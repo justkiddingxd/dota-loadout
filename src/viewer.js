@@ -1,0 +1,288 @@
+// A Dota 2 hero in the browser: the hero, his items and pedestal from the files built by
+// tools/build-heroes.mjs, lit like the game's loadout page, animated, with his particle effects,
+// turned by dragging. One viewer keeps its WebGL context and swaps heroes with load().
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
+import { Library, Simulation, SOURCE_TO_GLTF } from './fx.js';
+import { heroMaterial } from './material.js';
+
+// Tone mapping: each channel stays as it is up to the knee and rolls off softly toward 1 above it,
+// so bright fire goes yellow and white like in the game, without the hard edge of clipping.
+const KNEE = 0.75;
+// Light of the loadout page when a hero has no portrait of his own.
+const DEFAULT_LIGHTING = {
+  light: { angles: [50, 145, 0], color: [234, 243, 254], scale: 1.45 }, ambient: { angles: [-27, -114, 24], color: [79, 93, 93], scale: 5 },
+  shadow: { color: [56, 56, 56], scale: 5 }, camera: { position: [800, -370, 112] },
+};
+const DRAG = 0.008, WHEEL_TURN = 0.006, EASE = 10, GLIDE = 3.5;
+
+const groupInverse = SOURCE_TO_GLTF.clone().invert();
+const toSource = (m) => groupInverse.clone().multiply(m);
+const sourceRotation = new THREE.Matrix4().extractRotation(SOURCE_TO_GLTF);
+// A direction from the game's (pitch, yaw) in its space (x forward from the hero, z up).
+const forward = ([pitch, yaw]) => { const p = THREE.MathUtils.degToRad(pitch), y = THREE.MathUtils.degToRad(yaw); return new THREE.Vector3(Math.cos(p) * Math.cos(y), Math.cos(p) * Math.sin(y), -Math.sin(p)).applyMatrix4(sourceRotation); };
+const tint = (c, scale) => new THREE.Color().setRGB(...c.map((v) => v / 255), THREE.SRGBColorSpace).multiplyScalar(scale);
+
+export class HeroViewer {
+  // options: controls — true (drag anywhere), 'hero' (only a drag that starts on the hero; the rest
+  // goes on to the page) or false; wheel — 'zoom', 'turn' or false; framing — 'hero' (the hero,
+  // with what fits of the pedestal) or 'full' (hero and pedestal whole); pixelRatio; onProgress(loaded, total); onAnimation(name).
+  constructor(canvas, options = {}) {
+    this.canvas = canvas; this.options = { controls: true, wheel: 'zoom', framing: 'hero', ...options };
+    const renderer = this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, alpha: true, premultipliedAlpha: true, powerPreference: 'high-performance' });
+    renderer.setPixelRatio(Math.min(this.options.pixelRatio ?? globalThis.devicePixelRatio ?? 1, 2)); renderer.outputColorSpace = THREE.SRGBColorSpace; renderer.setClearColor(0x000000, 0);
+    renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFShadowMap;
+    // The scene is drawn in linear light without a ceiling (the game's HDR), then tone mapped onto
+    // the canvas: piled-up glows keep their hue instead of clipping to yellow and white.
+    this.hdr = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: 4 });
+    this.output = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({
+      uniforms: { tScene: { value: this.hdr.texture }, uKnee: { value: KNEE } }, depthTest: false, depthWrite: false, blending: THREE.NoBlending, toneMapped: false,
+      vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
+      fragmentShader: `uniform sampler2D tScene; uniform float uKnee; varying vec2 vUv;
+void main() {
+  gl_FragColor = texture2D(tScene, vUv); vec3 over = max(gl_FragColor.rgb - uKnee, 0.0), room = vec3(1.0 - uKnee);
+  gl_FragColor.rgb = min(gl_FragColor.rgb, vec3(uKnee)) + room * (1.0 - exp(-over / room));
+  #include <colorspace_fragment>
+}`,
+    }));
+    this.output.frustumCulled = false; this.outputCamera = new THREE.OrthographicCamera();
+    this.scene = new THREE.Scene(); this.camera = new THREE.PerspectiveCamera(30, 16 / 9, 0.05, 500);
+    this.light = {
+      uLightDir: { value: new THREE.Vector3() }, uLightColor: { value: new THREE.Color() }, uAmbientDir: { value: new THREE.Vector3() }, uAmbientColor: { value: new THREE.Color() },
+      uAmbientTint: { value: new THREE.Color() }, uShadowColor: { value: new THREE.Color() }, uUp: { value: new THREE.Vector3() },
+    };
+    this.toLight = new THREE.Vector3(0, 1, 1).normalize(); this.ambientDir = new THREE.Vector3(0, 1, 0);
+    this.sun = new THREE.DirectionalLight(0xffffff, 0); this.sun.castShadow = true; this.sun.shadow.mapSize.set(2048, 2048); this.sun.shadow.bias = -0.0005; this.sun.shadow.normalBias = 0.02;
+    this.scene.add(this.sun, this.sun.target);
+    this.time = { value: 0 }; this.hero = null; this.loading = 0;
+    this.view = { center: new THREE.Vector3(0, 2, 0), distance: 10, zoom: 1, zoomTarget: 1 };
+    this.turn = { angle: 0, target: 0, velocity: 0, dragging: null };
+    this.listen();
+    this.resize = new ResizeObserver(() => this.fit()); this.resize.observe(canvas);
+    this.visible = true;
+    this.intersection = new IntersectionObserver(([e]) => { this.visible = e.isIntersecting; }); this.intersection.observe(canvas);
+    this.timer = new THREE.Timer(); this.timer.connect?.(document);
+    renderer.setAnimationLoop(() => this.frame());
+  }
+
+  // A hero folder's address (with hero.json inside), or { manifest, url(path) } for bundlers.
+  async load(source) {
+    const ticket = ++this.loading;
+    const { manifest, url } = typeof source === 'string' ? await fetchHero(source) : source;
+    if (ticket !== this.loading) return null;
+    const manager = new THREE.LoadingManager(); manager.onProgress = (_, loaded, total) => this.options.onProgress?.(loaded, total);
+    const hero = await buildHero(manifest, url, manager, this.time, this.light);
+    // Textures load in the background; the hero shows once they are all in.
+    await new Promise((done) => { if (!manager.itemsTotal || manager.itemsLoaded >= manager.itemsTotal) done(); else { manager.onLoad = done; manager.onError = () => {}; } });
+    if (ticket !== this.loading) { hero.dispose(); return null; }
+    this.unload(); this.hero = hero; this.scene.add(hero.lib.group, hero.turntable);
+    this.applyLighting(manifest.lighting || DEFAULT_LIGHTING, hero);
+    this.turn.angle = this.turn.target = this.turn.velocity = 0; this.view.zoom = this.view.zoomTarget = 1;
+    this.fit();
+    return { name: manifest.name, animations: hero.animations };
+  }
+  unload() { if (!this.hero) return; this.scene.remove(this.hero.lib.group, this.hero.turntable); this.hero.dispose(); this.hero = null; }
+
+  get animations() { return this.hero?.animations || []; }
+  // Plays an animation by name: a looping one stays, the others play once and return to the idle.
+  play(name) { const d = this.hero?.play(name) ?? 0; this.options.onAnimation?.(name); return d; }
+
+  // The loadout page's light: a key light casting shadows, a directional ambient and a colour for
+  // what lies in shadow. The page turns the hero to face its camera, which stands off to his
+  // right-front: the light is turned by the same angle about the hero, the camera stays in front.
+  applyLighting(l, hero) {
+    const [cx, cy] = l.camera?.position || DEFAULT_LIGHTING.camera.position, facing = -THREE.MathUtils.radToDeg(Math.atan2(cy, cx));
+    this.toLight.copy(forward([l.light.angles[0], l.light.angles[1] + facing])).negate(); this.ambientDir.copy(forward([l.ambient.angles[0], l.ambient.angles[1] + facing]));
+    this.light.uLightColor.value.copy(tint(l.light.color, l.light.scale)); this.light.uAmbientColor.value.copy(tint(l.ambient.color, l.ambient.scale));
+    this.light.uAmbientTint.value.copy(tint(l.ambient.color, 1)); this.light.uShadowColor.value.copy(tint(l.shadow.color, l.shadow.scale));
+    const { box } = hero, size = box.getSize(new THREE.Vector3()), center = box.getCenter(new THREE.Vector3()), r = Math.max(size.x, size.y, size.z) * 0.75 + 0.5;
+    this.sun.position.copy(this.toLight).multiplyScalar(r * 3).add(center); this.sun.target.position.copy(center);
+    Object.assign(this.sun.shadow.camera, { left: -r, right: r, top: r, bottom: -r, near: r * 0.5, far: r * 6 }); this.sun.shadow.camera.updateProjectionMatrix();
+    // Framing: the camera looks level at the hero from far enough to fit him whole; with 'hero' the
+    // pedestal shows only as far as it fits under him, the view a little lower to leave it room.
+    const frame = this.options.framing === 'hero' ? hero.heroBox : box, fsize = frame.getSize(new THREE.Vector3());
+    this.view.center.copy(frame.getCenter(new THREE.Vector3())); this.view.size = fsize;
+    if (this.options.framing === 'hero' && hero.heroBox !== box) { this.view.center.y -= fsize.y * 0.1; this.view.size = fsize.clone().setY(fsize.y * 1.2); }
+  }
+
+  // ---- camera: the framing at any shape of the canvas.
+  fit() {
+    const { clientWidth: w, clientHeight: h } = this.canvas; if (!w || !h) return;
+    this.renderer.setSize(w, h, false); this.camera.aspect = w / h; const size = this.renderer.getDrawingBufferSize(new THREE.Vector2()); this.hdr.setSize(size.x, size.y);
+    this.camera.fov = 30; this.camera.updateProjectionMatrix(); this.place();
+  }
+  place() {
+    const { center, size, zoom } = this.view; if (!size) return;
+    const tanV = Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2)), tanH = tanV * this.camera.aspect;
+    const depth = Math.max(size.x, size.z) / 2, distance = Math.max((size.y * 0.62) / tanV, (Math.max(size.x, size.z) * 0.68) / tanH) + depth;
+    this.camera.position.set(center.x, center.y, center.z + distance / zoom); this.camera.lookAt(center.x, center.y, center.z);
+    this.camera.near = Math.max(0.05, distance / zoom / 50); this.camera.far = distance * 10; this.camera.updateProjectionMatrix(); this.camera.updateMatrixWorld();
+    const view = this.camera.matrixWorldInverse;
+    this.light.uLightDir.value.copy(this.toLight).transformDirection(view); this.light.uAmbientDir.value.copy(this.ambientDir).transformDirection(view); this.light.uUp.value.set(0, 1, 0).transformDirection(view);
+  }
+
+  // ---- turning: dragging turns the hero, eased toward the wanted angle; let go while moving and
+  // he keeps turning, slowing down. The wheel zooms (or turns).
+  listen() {
+    const c = this.canvas, t = this.turn;
+    const onHero = (e) => {
+      if (this.options.controls !== 'hero') return true; if (!this.hero) return false;
+      const r = c.getBoundingClientRect(), x = ((e.clientX - r.left) / r.width) * 2 - 1, y = -((e.clientY - r.top) / r.height) * 2 + 1;
+      const s = this.hero.screenBox(this.camera); return x >= s.min.x && x <= s.max.x && y >= s.min.y && y <= s.max.y;
+    };
+    this.onDown = (e) => { if (!this.options.controls || e.button !== 0 || !onHero(e)) return; e.stopPropagation(); t.dragging = { x: e.clientX, t: performance.now() }; t.velocity = 0; c.setPointerCapture(e.pointerId); c.style.cursor = 'grabbing'; };
+    this.onMove = (e) => {
+      if (!t.dragging) { if (this.options.controls) c.style.cursor = onHero(e) ? 'grab' : ''; return; }
+      const now = performance.now(), turn = (e.clientX - t.dragging.x) * DRAG; t.target += turn;
+      t.velocity = t.velocity * 0.5 + (turn / Math.max(8, now - t.dragging.t)) * 1000 * 0.5; t.dragging = { x: e.clientX, t: now };
+    };
+    this.onUp = (e) => { if (!t.dragging) return; if (performance.now() - t.dragging.t > 80) t.velocity = 0; t.dragging = null; c.style.cursor = this.options.controls ? 'grab' : ''; };
+    this.onWheel = (e) => {
+      if (!this.options.wheel || !onHero(e)) return; e.preventDefault();
+      const d = (e.deltaMode === 1 ? 16 : 1) * (Math.abs(e.deltaX) > Math.abs(e.deltaY) ? -e.deltaX : e.deltaY);
+      if (this.options.wheel === 'turn') t.target -= d * WHEEL_TURN; else this.view.zoomTarget = THREE.MathUtils.clamp(this.view.zoomTarget * Math.exp(-d * 0.0015), 0.6, 3);
+    };
+    c.addEventListener('pointerdown', this.onDown); c.addEventListener('pointermove', this.onMove); c.addEventListener('pointerup', this.onUp); c.addEventListener('pointercancel', this.onUp);
+    c.addEventListener('wheel', this.onWheel, { passive: false });
+  }
+  // Turns the hero to an angle (radians) or by a step, eased.
+  rotate(angle, { relative = false } = {}) { this.turn.target = relative ? this.turn.target + angle : angle; this.turn.velocity = 0; }
+  zoom(value) { this.view.zoomTarget = THREE.MathUtils.clamp(value, 0.6, 3); }
+
+  frame() {
+    this.timer.update(); const dt = Math.min(this.timer.getDelta(), 0.1); this.time.value = this.timer.getElapsed();
+    if (!this.visible || document.hidden || !this.hero) { if (!this.hero) { this.renderer.setRenderTarget(null); this.renderer.clear(); } return; }
+    const t = this.turn;
+    if (!t.dragging) { t.target += t.velocity * dt; t.velocity *= Math.exp(-GLIDE * dt); }
+    t.angle += (t.target - t.angle) * (1 - Math.exp(-EASE * dt)); this.hero.turntable.rotation.y = t.angle;
+    if (Math.abs(this.view.zoomTarget - this.view.zoom) > 1e-4) { this.view.zoom += (this.view.zoomTarget - this.view.zoom) * (1 - Math.exp(-EASE * dt)); this.place(); }
+    this.hero.update(dt, this.camera);
+    const r = this.renderer; r.setRenderTarget(this.hdr); r.clear(); r.render(this.scene, this.camera); r.setRenderTarget(null); r.render(this.output, this.outputCamera);
+  }
+
+  dispose() {
+    this.loading++; this.renderer.setAnimationLoop(null); this.resize.disconnect(); this.intersection.disconnect(); this.unload();
+    const c = this.canvas; c.removeEventListener('pointerdown', this.onDown); c.removeEventListener('pointermove', this.onMove); c.removeEventListener('pointerup', this.onUp); c.removeEventListener('pointercancel', this.onUp); c.removeEventListener('wheel', this.onWheel);
+    this.hdr.dispose(); this.output.geometry.dispose(); this.output.material.dispose(); this.renderer.dispose();
+  }
+}
+
+async function fetchHero(base) {
+  const root = base.endsWith('/') ? base : `${base}/`, href = new URL(root, globalThis.location?.href).href;
+  const response = await fetch(`${href}hero.json`); if (!response.ok) throw new Error(`${href}hero.json: ${response.status}`);
+  return { manifest: await response.json(), url: (path) => href + path };
+}
+
+// ---------------------------------------------------------------- one hero
+async function buildHero(manifest, url, manager, time, light) {
+  const textures = new THREE.TextureLoader(manager), made = [];
+  const texture = (file, srgb = false) => { const t = textures.load(url(`textures/${file}`)); t.flipY = false; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace; t.anisotropy = 4; made.push(t); return t; };
+  // The models are packed with EXT_meshopt_compression (tools/compress.mjs).
+  const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
+  const names = Object.keys(manifest.models), loaded = Object.fromEntries(await Promise.all(names.map(async (k) => [k, await loader.loadAsync(url(manifest.models[k]))])));
+  const heroModel = loaded.hero, root = heroModel.scene, bones = {}, inverses = {};
+
+  // Items follow the hero's skeleton by bone name, as the game bone-merges them; an item's own
+  // extra bones hang under the hero bone that is their parent.
+  root.traverse((o) => { if (o.isBone) bones[o.name.toLowerCase()] = o; if (o.isSkinnedMesh) o.skeleton.bones.forEach((b, i) => { inverses[b.name.toLowerCase()] ||= o.skeleton.boneInverses[i]; }); });
+  const items = names.filter((k) => k !== 'hero' && k !== 'pedestal');
+  for (const name of items) {
+    const item = loaded[name].scene, meshes = [], rigid = [];
+    item.traverse((o) => { if (o.isSkinnedMesh) meshes.push(o); else if (o.isMesh) rigid.push(o); });
+    for (const mesh of meshes) {
+      const mapped = mesh.skeleton.bones.map((b) => { const own = bones[b.name.toLowerCase()]; if (own) return own; const parent = b.parent && bones[b.parent.name.toLowerCase()]; if (parent) parent.add(b); return b; });
+      mesh.skeleton.bones.forEach((b, i) => { const k = b.name.toLowerCase(); inverses[k] ||= mesh.skeleton.boneInverses[i]; bones[k] ||= mapped[i]; });
+      mesh.bind(new THREE.Skeleton(mapped, mesh.skeleton.boneInverses), mesh.bindMatrix); root.add(mesh);
+    }
+    // Unskinned items stay as they are, beside the hero.
+    for (const mesh of rigid) root.add(mesh);
+  }
+  const turntable = new THREE.Group(); turntable.add(root); if (loaded.pedestal) turntable.add(loaded.pedestal.scene);
+  const materials = new Map();
+  turntable.traverse((o) => {
+    if (!o.isMesh) return; o.frustumCulled = false; o.castShadow = o.receiveShadow = true;
+    // A mesh whose material did not come with the hero (an additive glow, a motion smear) is hidden
+    // rather than drawn plain white.
+    const key = o.material.name, m = manifest.materials[key]; if (!m) { o.visible = false; return; }
+    if (!materials.has(key)) materials.set(key, heroMaterial(m, texture, time, light)); o.material.dispose(); o.material = materials.get(key);
+  });
+
+  // Animations: the entry once, then the idle loop; the others on request.
+  const mixer = new THREE.AnimationMixer(root), clips = new Map(heroModel.animations.map((a) => [a.name, a]));
+  const a = manifest.animations || {}, list = (a.list || [...clips.keys()].map((name) => ({ name }))).filter((x) => clips.has(x.name));
+  const action = (name) => { const c = clips.get(name); return c ? mixer.clipAction(c) : null; };
+  const idleName = clips.has(a.idle) ? a.idle : list[0]?.name;
+  const idle = idleName ? action(idleName) : null; let current = idle;
+  const loops = new Set(list.filter((x) => x.loop).map((x) => x.name)); if (idleName) loops.add(idleName);
+  const start = (name, fade = 0.25) => {
+    const next = action(name); if (!next) return 0;
+    const loop = loops.has(name); next.reset(); next.setLoop(loop ? THREE.LoopRepeat : THREE.LoopOnce, Infinity); next.clampWhenFinished = !loop; next.play();
+    if (current && current !== next) current.crossFadeTo(next, fade, false); current = next; return next.getClip().duration;
+  };
+  mixer.addEventListener('finished', (e) => { if (e.action === current && idle && current !== idle) start(idleName, 0.3); });
+  // Bounds in the idle pose (for framing, shadows and the drag area); then the entry, if any.
+  if (idle) start(idleName, 0);
+  mixer.update(0); turntable.updateMatrixWorld(true);
+  const samples = [], point = new THREE.Vector3(), heroBox = new THREE.Box3(), box = new THREE.Box3();
+  turntable.traverse((o) => { if (!o.isMesh) return; const count = o.geometry.attributes.position.count, step = Math.max(1, Math.ceil(count / 600)); for (let i = 0; i < count; i += step) samples.push([o, i]); });
+  const isPedestal = (o) => { for (let p = o; p; p = p.parent) if (p === loaded.pedestal?.scene) return true; return false; };
+  for (const [mesh, i] of samples) { mesh.getVertexPosition(i, point).applyMatrix4(mesh.matrixWorld); box.expandByPoint(point); if (!isPedestal(mesh)) heroBox.expandByPoint(point); }
+  if (heroBox.isEmpty()) heroBox.copy(box);
+  if (a.entry && clips.has(a.entry)) { start(a.entry, 0); mixer.update(0); }
+
+  // ---- effects: the hero's particles with their own control point drivers, in the game's space.
+  const lib = new Library({ systems: manifest.systems || {}, textures: manifest.textures || {}, snapshots: manifest.snapshots || {}, url: (file) => url(`fx/${file}`) });
+  lib.loader.manager = manager;
+  const attachment = (name, owner) => { for (const model of [owner, 'hero', ...items]) { const at = manifest.attachments?.[model]?.[name]; if (at) return at; } return null; };
+  const attachmentMatrix = (at) => { const bone = bones[at.bones[0].toLowerCase()]; if (!bone) return null;
+    return toSource(bone.matrixWorld.clone().multiply(new THREE.Matrix4().compose(new THREE.Vector3(...at.offsets[0]).multiplyScalar(0.0254), new THREE.Quaternion(...at.rotations[0]), new THREE.Vector3(1, 1, 1)))); };
+  const model = {
+    bones: ((list) => (list.length ? list : Object.values(bones).filter((b) => b.isBone)))(Object.values(bones).filter((b) => b.name.endsWith('_JNT'))),
+    bone: (name) => bones[name.toLowerCase()] || null,
+    // A point in a bone's own space (inches), in the effects' space.
+    boneLocal(name, pos) { const b = bones[name.toLowerCase()]; return b ? pos.clone().multiplyScalar(0.0254).applyMatrix4(b.matrixWorld).applyMatrix4(groupInverse) : pos.clone(); },
+    boneMatrix: (b) => toSource(b.matrixWorld.clone()),
+    bonePosition: (b) => new THREE.Vector3().setFromMatrixPosition(toSource(b.matrixWorld.clone())),
+    skin(pos, skin) {
+      const p = pos.clone().applyMatrix4(SOURCE_TO_GLTF), out = new THREE.Vector3(), t = new THREE.Vector3(); let total = 0;
+      for (const [name, w] of skin) { const b = bones[name.toLowerCase()], inv = inverses[name.toLowerCase()]; if (!b || !inv || !w) continue; t.copy(p).applyMatrix4(inv).applyMatrix4(b.matrixWorld); out.addScaledVector(t, w); total += w; }
+      return total ? out.divideScalar(total).applyMatrix4(groupInverse) : pos.clone();
+    },
+  };
+  const effects = (manifest.effects || []).map((e) => { const def = manifest.systems?.[e.system]; if (!def) return null; const sim = new Simulation(def, lib); sim.model = model;
+    return { sim, owner: e.owner, drivers: def.m_controlPointConfigurations?.[0]?.m_drivers || [] }; }).filter(Boolean);
+  const drive = () => {
+    const origin = toSource(root.matrixWorld.clone());
+    for (const e of effects) {
+      const cps = e.sim.cps; cps.clear();
+      const set = (i, m) => { const c = { pos: new THREE.Vector3(), quat: new THREE.Quaternion(), matrix() { return new THREE.Matrix4().compose(this.pos, this.quat, new THREE.Vector3(1, 1, 1)); } }; m.decompose(c.pos, c.quat, new THREE.Vector3()); cps.set(i, c); };
+      set(0, origin);
+      for (const d of e.drivers) {
+        const i = d.m_iControlPoint ?? 0, type = d.m_iAttachType || 'PATTACH_ABSORIGIN_FOLLOW';
+        if (type === 'PATTACH_WORLDORIGIN') { set(i, new THREE.Matrix4()); continue; }
+        const at = d.m_attachmentName && attachment(d.m_attachmentName, e.owner), m = at && attachmentMatrix(at); set(i, m || origin);
+      }
+    }
+  };
+
+  return {
+    turntable, lib, box, heroBox, animations: list.map((x) => ({ ...x, loop: loops.has(x.name), duration: clips.get(x.name).duration })),
+    play: (name) => start(name),
+    update(dt, camera) {
+      mixer.update(dt); turntable.updateMatrixWorld(true); drive();
+      for (const e of effects) e.sim.update(dt);
+      for (const e of effects) e.sim.render(camera, groupInverse);
+    },
+    // The rectangle the hero covers on screen (normalized device coordinates), with a small margin.
+    screenBox(camera) {
+      const s = new THREE.Box2();
+      for (const [mesh, i] of samples) { mesh.getVertexPosition(i, point).applyMatrix4(mesh.matrixWorld).project(camera); s.expandByPoint(new THREE.Vector2(point.x, point.y)); }
+      return s.expandByVector(s.getSize(new THREE.Vector2()).multiplyScalar(0.03));
+    },
+    dispose() {
+      mixer.stopAllAction(); turntable.traverse((o) => { o.geometry?.dispose(); });
+      for (const m of materials.values()) m.dispose(); for (const t of made) t.dispose(); lib.dispose();
+    },
+  };
+}

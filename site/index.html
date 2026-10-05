@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Loadout — Dota 2 heroes in the browser</title>
+  <meta name="description" content="Every Dota 2 hero rendered live in the browser: the game's hero shader, animations and particle effects. Open source, MIT.">
+  <meta name="theme-color" content="#0c0b09">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230c0b09'/%3E%3Cpath d='M11 7v18h11' fill='none' stroke='%23e9e2d2' stroke-width='3.4'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Sans+Extra+Condensed:wght@300;500;700;800&family=Fira+Sans+Condensed:ital,wght@0,400;0,500;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body data-attr="agi">
+  <div class="app">
+    <aside class="roster" aria-label="Heroes">
+      <header class="mast">
+        <a class="logo" href="./" aria-label="Loadout">
+          <span class="logo-mark">Loadout</span>
+          <span class="logo-text">Dota 2<br>heroes</span>
+        </a>
+        <button class="lang" type="button" data-lang-toggle>EN</button>
+      </header>
+      <label class="search">
+        <input type="search" autocomplete="off" spellcheck="false" data-search>
+        <kbd>/</kbd>
+      </label>
+      <div class="attrs" role="group" data-attrs></div>
+      <nav class="list" data-list></nav>
+      <footer class="colophon">
+        <p data-t="colophon"></p>
+        <p class="meta"><a href="https://github.com/justkiddingxd/dota-loadout" data-repo>GitHub</a> · MIT · <span data-build></span></p>
+      </footer>
+    </aside>
+
+    <main class="stage">
+      <div class="backdrop" aria-hidden="true">
+        <div class="glow"></div>
+        <div class="floor"></div>
+        <div class="ghost" data-ghost></div>
+      </div>
+      <canvas class="view" data-view></canvas>
+
+      <div class="top">
+        <div class="kicker">
+          <span class="dot"></span>
+          <span data-attr-name></span>
+          <span class="sep">/</span>
+          <span data-roles></span>
+        </div>
+        <div class="tools">
+          <button type="button" data-reset></button>
+          <button type="button" data-embed></button>
+        </div>
+      </div>
+
+      <div class="status" data-status>
+        <div class="bar"><i data-bar></i></div>
+        <span data-status-text></span>
+      </div>
+      <p class="hint" data-hint></p>
+
+      <section class="plate">
+        <div class="ident">
+          <span class="num" data-num></span>
+          <h1 data-name></h1>
+          <span class="complexity" data-complexity></span>
+        </div>
+        <p class="hype" data-hype></p>
+        <div class="anims">
+          <span class="anims-label" data-t="animations"></span>
+          <ul data-anims></ul>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <dialog class="embed" data-embed-dialog>
+    <form method="dialog">
+      <header>
+        <h2 data-t="embedTitle"></h2>
+        <button value="close" aria-label="Close">×</button>
+      </header>
+      <p data-t="embedText"></p>
+      <pre><code data-embed-code></code></pre>
+      <div class="embed-actions"><button type="button" data-copy></button></div>
+      <p class="fine" data-t="embedFine"></p>
+    </form>
+  </dialog>
+
+  <script type="module" src="./main.js"></script>
+</body>
+</html>

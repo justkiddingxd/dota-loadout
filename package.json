@@ -1,0 +1,51 @@
+{
+  "name": "dota-loadout",
+  "version": "0.1.0",
+  "description": "Loadout: every Dota 2 hero live in the browser with three.js — the game's hero shader, loadout light, animations and particle effects",
+  "homepage": "https://rin.ms/d2h/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/justkiddingxd/dota-loadout.git"
+  },
+  "bugs": {
+    "url": "https://github.com/justkiddingxd/dota-loadout/issues"
+  },
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "dev": "vite site",
+    "build": "vite build site",
+    "heroes": "node tools/build-heroes.mjs",
+    "check": "node --check src/index.js && node --check src/viewer.js && node --check src/fx.js && node --check src/material.js && node --check tools/build-heroes.mjs && node --check tools/lib/hero.mjs && node --check tools/lib/game.mjs"
+  },
+  "keywords": [
+    "dota2",
+    "three.js",
+    "webgl",
+    "source2",
+    "hero",
+    "model-viewer"
+  ],
+  "license": "MIT",
+  "peerDependencies": {
+    "three": ">=0.180.0"
+  },
+  "devDependencies": {
+    "@gltf-transform/core": "4.5.1",
+    "@gltf-transform/extensions": "4.5.1",
+    "@gltf-transform/functions": "4.5.1",
+    "@napi-rs/canvas": "1.0.9",
+    "meshoptimizer": "1.3.0",
+    "three": "0.186.1",
+    "vite": "8.3.1"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
