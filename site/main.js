@@ -39,6 +39,7 @@ const viewer = new HeroViewer(canvas, {
   onProgress: (loaded, total) => { $('[data-bar]').style.width = `${total ? Math.round((loaded / total) * 100) : 0}%`; },
 });
 canvas.addEventListener('pointerdown', () => $('[data-hint]').classList.add('gone'), { once: true });
+globalThis.__loadout = viewer; // for poking at the scene from the console
 
 // ---------------------------------------------------------------- texts
 function applyTexts() {

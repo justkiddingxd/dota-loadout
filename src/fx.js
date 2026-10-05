@@ -575,7 +575,11 @@ class QuadBatch {
   }
   begin() { this.n = 0; }
   quad(corners, color, uvA, uvB, blend) {
-    if (this.n >= this.capacity) return; const i = this.n++;
+    if (this.n >= this.capacity) return;
+    // A card with any value that is not a number would be drawn as a solid square (or not at all,
+    // depending on the GPU): it is skipped.
+    if (!Number.isFinite(blend) || !corners.every((c) => Number.isFinite(c.x + c.y + c.z)) || !(Array.isArray(color[0]) ? color.flat() : color).every(Number.isFinite) || !uvA.every(Number.isFinite) || !uvB.every(Number.isFinite)) return;
+    const i = this.n++;
     for (let k = 0; k < 4; k++) { this.pos.set([corners[k].x, corners[k].y, corners[k].z], i * 12 + k * 3); const c = Array.isArray(color[0]) ? color[k] : color; this.col.set(this.linear ? [lin(c[0]), lin(c[1]), lin(c[2]), c[3]] : c, i * 16 + k * 4); this.ua.set(uvA, i * 16 + k * 4); this.ub.set(uvB, i * 16 + k * 4); this.bl[i * 4 + k] = blend; }
   }
   end() { const g = this.mesh.geometry; g.setDrawRange(0, this.n * 6); for (const k of ['position', 'color', 'uvA', 'uvB', 'blend']) g.attributes[k].needsUpdate = true; }
@@ -586,8 +590,10 @@ function sheetFrame(info, p, rate, type) {
   if (seq.frames.length < 2) return { a: seq.frames[0].uv, b: seq.frames[0].uv, fa: seq.frames[0], fb: seq.frames[0], t: 0 };
   const total = seq.frames.reduce((a, f) => a + f.time, 0) || seq.frames.length;
   const passes = (type === 'ANIMATION_TYPE_FIT_LIFETIME' ? p.nage : p.age) * rate;
-  let pos = total * (seq.clamp ? saturate(passes) : passes - Math.floor(passes));
-  for (let i = 0; i < seq.frames.length; i++) { const f = seq.frames[i]; if (pos < f.time || i === seq.frames.length - 1) { const n = seq.clamp ? Math.min(i + 1, seq.frames.length - 1) : (i + 1) % seq.frames.length; return { a: f.uv, b: seq.frames[n].uv, fa: f, fb: seq.frames[n], t: saturate(pos / f.time) }; } pos -= f.time; }
+  // A sheet's last frame may last 0 (caustic.vtex): its blend toward the next is 0, not 0 / 0. A NaN
+  // here reached the shader and drew the whole card white.
+  let pos = total * (seq.clamp ? saturate(passes) : passes - Math.floor(passes)); if (!Number.isFinite(pos)) pos = 0;
+  for (let i = 0; i < seq.frames.length; i++) { const f = seq.frames[i]; if (pos < f.time || i === seq.frames.length - 1) { const n = seq.clamp ? Math.min(i + 1, seq.frames.length - 1) : (i + 1) % seq.frames.length; return { a: f.uv, b: seq.frames[n].uv, fa: f, fb: seq.frames[n], t: f.time > 0 ? saturate(pos / f.time) : 0 }; } pos -= f.time; }
   return null;
 }
 const FULL = [0, 0, 1, 1];

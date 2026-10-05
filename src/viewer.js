@@ -267,7 +267,7 @@ async function buildHero(manifest, url, manager, time, light) {
   };
 
   return {
-    turntable, lib, box, heroBox, animations: list.map((x) => ({ ...x, loop: loops.has(x.name), duration: clips.get(x.name).duration })),
+    turntable, lib, box, heroBox, effects, animations: list.map((x) => ({ ...x, loop: loops.has(x.name), duration: clips.get(x.name).duration })),
     play: (name) => start(name),
     update(dt, camera) {
       mixer.update(dt); turntable.updateMatrixWorld(true); drive();
