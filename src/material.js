@@ -21,8 +21,10 @@ const srgb = (c) => new THREE.Color().setRGB(...c, THREE.SRGBColorSpace);
 export function heroMaterial(m, texture, time, light) {
   const material = new THREE.MeshPhongMaterial({
     map: m.color ? texture(m.color, true) : null, normalMap: m.normal ? texture(m.normal) : null,
-    alphaTest: m.alphaTest || 0, transparent: !!m.translucent, depthWrite: !m.translucent, side: THREE.DoubleSide,
+    alphaTest: m.alphaTest || 0, transparent: !!(m.translucent || m.additive), depthWrite: !(m.translucent || m.additive), side: THREE.DoubleSide,
   });
+  // F_ADDITIVE_BLEND: glow layers (weapons, wings, Visage's spectral body) add to what lies behind.
+  if (m.additive) material.blending = THREE.AdditiveBlending;
   const uniforms = {
     ...light, tMasks: { value: m.masks ? texture(m.masks) : BLACK }, tSpec: { value: m.specular ? texture(m.specular) : BLACK },
     tDetail: { value: m.detail ? texture(m.detail, true) : BLACK }, tFresnel: { value: m.fresnel ? texture(m.fresnel) : GREY }, uTime: time,

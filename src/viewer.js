@@ -4,6 +4,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
+import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 import { Library, Simulation, SOURCE_TO_GLTF } from './fx.js';
 import { heroMaterial } from './material.js';
 
@@ -181,6 +182,7 @@ async function buildHero(manifest, url, manager, time, light) {
   // The models are packed with EXT_meshopt_compression (tools/compress.mjs).
   const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
   const names = Object.keys(manifest.models), loaded = Object.fromEntries(await Promise.all(names.map(async (k) => [k, await loader.loadAsync(url(manifest.models[k]))])));
+  const propFiles = [...new Set((manifest.props || []).map((p) => p.file))], propModels = Object.fromEntries(await Promise.all(propFiles.map(async (f) => [f, await loader.loadAsync(url(f))])));
   const heroModel = loaded.hero, root = heroModel.scene, bones = {}, inverses = {};
 
   // Items follow the hero's skeleton by bone name, as the game bone-merges them; an item's own
@@ -200,25 +202,26 @@ async function buildHero(manifest, url, manager, time, light) {
   }
   const turntable = new THREE.Group(); turntable.add(root); if (loaded.pedestal) turntable.add(loaded.pedestal.scene);
   const materials = new Map();
-  turntable.traverse((o) => {
+  const dress = (group) => group.traverse((o) => {
     if (!o.isMesh) return; o.frustumCulled = false; o.castShadow = o.receiveShadow = true;
     // A mesh whose material did not come with the hero (an additive glow, a motion smear) is hidden
     // rather than drawn plain white.
     const key = o.material.name, m = manifest.materials[key]; if (!m) { o.visible = false; return; }
     if (!materials.has(key)) materials.set(key, heroMaterial(m, texture, time, light)); o.material.dispose(); o.material = materials.get(key);
   });
+  dress(turntable);
 
   // Animations: the entry once, then the idle loop; the others on request.
   const mixer = new THREE.AnimationMixer(root), clips = new Map(heroModel.animations.map((a) => [a.name, a]));
   const a = manifest.animations || {}, list = (a.list || [...clips.keys()].map((name) => ({ name }))).filter((x) => clips.has(x.name));
   const action = (name) => { const c = clips.get(name); return c ? mixer.clipAction(c) : null; };
   const idleName = clips.has(a.idle) ? a.idle : list[0]?.name;
-  const idle = idleName ? action(idleName) : null; let current = idle;
+  const idle = idleName ? action(idleName) : null; let current = idle, currentName = idleName;
   const loops = new Set(list.filter((x) => x.loop).map((x) => x.name)); if (idleName) loops.add(idleName);
   const start = (name, fade = 0.25) => {
     const next = action(name); if (!next) return 0;
     const loop = loops.has(name); next.reset(); next.setLoop(loop ? THREE.LoopRepeat : THREE.LoopOnce, Infinity); next.clampWhenFinished = !loop; next.play();
-    if (current && current !== next) current.crossFadeTo(next, fade, false); current = next; return next.getClip().duration;
+    if (current && current !== next) current.crossFadeTo(next, fade, false); current = next; currentName = name; return next.getClip().duration;
   };
   mixer.addEventListener('finished', (e) => { if (e.action === current && idle && current !== idle) start(idleName, 0.3); });
   // Bounds in the idle pose (for framing, shadows and the drag area); then the entry, if any.
@@ -229,6 +232,16 @@ async function buildHero(manifest, url, manager, time, light) {
   const isPedestal = (o) => { for (let p = o; p; p = p.parent) if (p === loaded.pedestal?.scene) return true; return false; };
   for (const [mesh, i] of samples) { mesh.getVertexPosition(i, point).applyMatrix4(mesh.matrixWorld); box.expandByPoint(point); if (!isPedestal(mesh)) heroBox.expandByPoint(point); }
   if (heroBox.isEmpty()) heroBox.copy(box);
+  // Props (Pudge's clown car, Largo's frogs): one copy per event, at the hero, shown while their
+  // animation plays from the event's frame on, their own clip kept in step with the hero's time.
+  // Added after the bounds, which are the hero's alone. (No prop of the game uses an attachment.)
+  const props = (manifest.props || []).map((p) => {
+    const source = propModels[p.file]; if (!source) return null;
+    const scene = cloneSkinned(source.scene), clip = source.animations.find((c) => c.name === p.clip), mixer = new THREE.AnimationMixer(scene);
+    if (clip) { const act = mixer.clipAction(clip); act.setLoop(p.loop ? THREE.LoopRepeat : THREE.LoopOnce, Infinity); act.clampWhenFinished = true; act.play(); }
+    scene.visible = false; dress(scene); turntable.add(scene);
+    return { ...p, scene, mixer };
+  }).filter(Boolean);
   if (a.entry && clips.has(a.entry)) { start(a.entry, 0); mixer.update(0); }
 
   // ---- effects: the hero's particles with their own control point drivers, in the game's space.
@@ -270,7 +283,11 @@ async function buildHero(manifest, url, manager, time, light) {
     turntable, lib, box, heroBox, effects, animations: list.map((x) => ({ ...x, loop: loops.has(x.name), duration: clips.get(x.name).duration })),
     play: (name) => start(name),
     update(dt, camera) {
-      mixer.update(dt); turntable.updateMatrixWorld(true); drive();
+      mixer.update(dt);
+      // A later event with the same model in the same animation takes over (Ringmaster's box: built, then broken).
+      for (const p of props) p.at = currentName === p.sequence && current ? current.time - p.frame / 30 : -1;
+      for (const p of props) { const later = props.some((q) => q !== p && q.file === p.file && q.sequence === p.sequence && q.frame > p.frame && q.at >= 0); p.scene.visible = p.at >= 0 && !later; if (p.scene.visible) p.mixer.setTime(p.at); }
+      turntable.updateMatrixWorld(true); drive();
       for (const e of effects) e.sim.update(dt);
       for (const e of effects) e.sim.render(camera, groupInverse);
     },
@@ -281,7 +298,7 @@ async function buildHero(manifest, url, manager, time, light) {
       return s.expandByVector(s.getSize(new THREE.Vector2()).multiplyScalar(0.03));
     },
     dispose() {
-      mixer.stopAllAction(); turntable.traverse((o) => { o.geometry?.dispose(); });
+      mixer.stopAllAction(); for (const p of props) p.mixer.stopAllAction(); turntable.traverse((o) => { o.geometry?.dispose(); });
       for (const m of materials.values()) m.dispose(); for (const t of made) t.dispose(); lib.dispose();
     },
   };

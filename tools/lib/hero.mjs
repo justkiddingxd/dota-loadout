@@ -16,7 +16,7 @@ import { promisify } from 'node:util';
 import { Euler, Matrix4, Quaternion, Vector3 } from 'three';
 import { compressHeroModels } from './compress.mjs';
 import { compact, readGlb, readPng, writeGlb } from './files.mjs';
-import { pickAnimations, sequences } from './game.mjs';
+import { pickAnimations, scopeProps, sequences } from './game.mjs';
 import { parseKV3 } from '../kv3.mjs';
 
 const exec = promisify(execFile);
@@ -37,8 +37,23 @@ export async function buildHero({ game, cli, hero, out, temp, log = () => {} }) 
   for (const w of hero.wearables) if (has(w.model) && w.model !== hero.model) MODELS[w.slot] = w.model;
   if (hero.pedestal && has(hero.pedestal)) MODELS.pedestal = hero.pedestal;
   if (!has(hero.model)) throw new Error(`no ${hero.model}`);
-  const animations = pickAnimations(sequences(await run(['-i', join(game, `${hero.model}_c`), '-a'])));
+  const heroDump = await run(['-i', join(game, `${hero.model}_c`), '-a']);
+  const animations = pickAnimations(sequences(heroDump));
   const wanted = [...new Set([animations.entry, animations.idle, ...animations.list.map((a) => a.name)].filter(Boolean))];
+
+  // Props of those animations, one model file each, with the clips the events ask for: the sequence
+  // named by the event's activity, or having it as activity, or the model's only one.
+  const props = scopeProps(heroDump, wanted).filter((p) => has(p.model)), propModels = {};
+  for (const p of props) {
+    if (!propModels[p.model]) {
+      const seqs = sequences(await run(['-i', join(game, `${p.model}_c`), '-a'])).filter((s) => !s.name.startsWith('@') && s.name !== 'bindPose');
+      propModels[p.model] = { name: `prop${Object.keys(propModels).length}`, seqs, clips: new Set() };
+    }
+    const m = propModels[p.model], s = m.seqs.find((x) => x.name === p.activity) || m.seqs.find((x) => p.activity && x.activity === p.activity) || (m.seqs.length === 1 ? m.seqs[0] : null);
+    p.clip = s?.name || null; p.loop = !!s?.loop; if (s) m.clips.add(s.name);
+  }
+  for (const m of Object.values(propModels)) MODELS[m.name] = Object.keys(propModels).find((k) => propModels[k] === m);
+  const isProp = (name) => /^prop\d+$/.test(name);
 
   // Resource external references (the RERL block) of a compiled file.
   const references = (path) => {
@@ -57,7 +72,8 @@ export async function buildHero({ game, cli, hero, out, temp, log = () => {} }) 
     const dir = join(temp, 'glb', name), file = join(dir, `${name}.glb`); mkdirSync(dir, { recursive: true });
     const args = ['-i', join(game, `${path}_c`), '--game', gameinfo, '-o', file, '-d', '--gltf_export_format', 'glb', '--gltf_export_materials', '--gltf_textures_adapt'];
     // The skeleton only comes with animations exported; items take the hero's, so only the hero keeps clips.
-    if (name !== 'pedestal') args.push('--gltf_export_animations', '--gltf_animation_list', name === 'hero' ? wanted.join(',') : '-');
+    const propClips = isProp(name) ? [...Object.values(propModels).find((m) => m.name === name).clips] : null;
+    if (name !== 'pedestal') args.push('--gltf_export_animations', '--gltf_animation_list', name === 'hero' ? wanted.join(',') : propClips?.length ? propClips.join(',') : '-');
     try { await run(args); } catch (e) { log(`  ${name}: ${path} not exported (${e.message.split('\n')[0]})`); continue; }
     if (!existsSync(file)) { log(`  ${name}: ${path} not exported`); continue; }
     const { json, bin } = readGlb(file);
@@ -65,14 +81,14 @@ export async function buildHero({ game, cli, hero, out, temp, log = () => {} }) 
     // Items are bone-merged onto the hero: one that shares no bone with him is someone else (a summon, a ward).
     const bones = (json.skins || []).flatMap((s) => s.joints.map((j) => json.nodes[j].name?.toLowerCase()));
     if (name === 'hero') bones.forEach((b) => heroBones.add(b));
-    else if (name !== 'pedestal' && json.skins?.length && !bones.some((b) => heroBones.has(b))) { log(`  ${name}: ${path} shares no bone with the hero, left out`); continue; }
+    else if (name !== 'pedestal' && !isProp(name) && json.skins?.length && !bones.some((b) => heroBones.has(b))) { log(`  ${name}: ${path} shares no bone with the hero, left out`); continue; }
     // The normal maps come adapted to glTF by the exporter; everything else is read from the material.
     for (const material of json.materials || []) {
       const normal = json.images?.[json.textures?.[material.normalTexture?.index]?.source]?.uri;
       materials[material.name] = { ...materials[material.name], normalFile: normal ? join(dir, normal) : null };
     }
     for (const m of json.materials || []) { for (const k of ['pbrMetallicRoughness', 'normalTexture', 'occlusionTexture', 'emissiveTexture']) delete m[k]; delete m.extensions; }
-    delete json.images; delete json.textures; delete json.samplers; if (name !== 'hero') delete json.animations;
+    delete json.images; delete json.textures; delete json.samplers; if (name !== 'hero' && !isProp(name)) delete json.animations;
     for (const n of json.nodes || []) if (n.name?.includes('/')) n.name = basename(n.name).replace(/\.vmdl_c.*/, '');
     for (const m of json.meshes || []) if (m.name?.includes('/')) m.name = basename(m.name);
     writeGlb(join(out, 'models', `${name}.glb`), json, compact(json, bin));
@@ -80,6 +96,9 @@ export async function buildHero({ game, cli, hero, out, temp, log = () => {} }) 
     for (const ref of references(path)) if (ref.endsWith('.vmat')) materials[basename(ref, '.vmat')] = { ...materials[basename(ref, '.vmat')], vmat: ref };
   }
   if (!modelFiles.hero) throw new Error(`${hero.model} not exported`);
+  // Props are not worn: they leave the models list for one of their own.
+  const propFiles = {};
+  for (const name of Object.keys(modelFiles).filter(isProp)) { propFiles[name] = modelFiles[name]; delete modelFiles[name]; }
 
   // ---------------------------------------------------------------- materials
   const image = async (file) => loadImage(readFileSync(file));
@@ -103,12 +122,32 @@ export async function buildHero({ game, cli, hero, out, temp, log = () => {} }) 
     const text = readFileSync(join(dir, `${name}.vmat`), 'utf8'), p = Object.fromEntries([...text.matchAll(/^\t"([^"]+)"\t"([^"]*)"/gm)].map((m) => [m[1], m[2]]));
     const pick = (suffix) => { const f = readdirSync(dir).find((x) => x.endsWith(`${suffix}.png`)); return f ? join(dir, f) : null; };
     const scroll = /float2\(([-.\d]+),([-.\d]+)\)/.exec(text.split('"DynamicParams"')[1] || '');
-    const colorFile = pick('_color') || (p.TextureColor && existsSync(join(dir, basename(p.TextureColor))) ? join(dir, basename(p.TextureColor)) : null);
-    if (!colorFile) { log(`  ${name}: no colour texture (${p.shader})`); delete materials[name]; continue; }
+    // The colour: <name>_color.png from the hero shader; …_g_tcolor_<hash>.png from the others
+    // (global_lit_simple); or a constant colour for a material without a texture.
+    // A colour given as a constant ([r g b a] in the .vmat) wins: the compiled …_g_tcolor_… texture then
+    // only carries the see-through mask in its alpha, its colour a white placeholder (Arc Warden's
+    // additive layer, Dark Seer's rope).
+    const tcolor = readdirSync(dir).find((x) => /_g_tcolor_[0-9a-f]+\.png$/.test(x));
+    const constant = /^\[[-\d.\s]+\]$/.test(p.TextureColor || '') ? vector(p.TextureColor) : null;
+    const colorFile = pick('_color') || (!constant && tcolor && join(dir, tcolor)) || (p.TextureColor && !constant && existsSync(join(dir, basename(p.TextureColor))) ? join(dir, basename(p.TextureColor)) : null);
+    // A constant colour only for a layer with its own mask (Marci's eye shadow); others without a
+    // texture (Kez's grappling rope) are ability meshes the game keeps hidden.
+    const maskFile = constant && !colorFile ? (tcolor && join(dir, tcolor)) || pick('_trans') : null;
+    if (!colorFile && !maskFile) { log(`  ${name}: no colour texture (${p.shader})`); delete materials[name]; continue; }
     // Colour with the alpha-test mask in alpha. Textures need not be square: the colour keeps its own
     // shape, the masks below are stretched to squares, which keeps their UVs.
-    const original = await image(colorFile), fit = Math.min(1, sizeCap(name) / Math.max(original.width, original.height));
+    const original = colorFile ? await image(colorFile) : await (async () => {
+      const m = await image(maskFile), k = createCanvas(m.width, m.height), x = k.getContext('2d');
+      x.fillStyle = `rgb(${constant.slice(0, 3).map((v) => Math.round(Math.min(1, v) * 255)).join(',')})`; x.fillRect(0, 0, k.width, k.height);
+      // The mask's alpha (…_g_tcolor_…) or its grey (…_trans) becomes the colour's alpha below, through _trans or here.
+      if (tcolor && maskFile === join(dir, tcolor)) { const a = channel(m, k.width, k.height), d = x.getImageData(0, 0, k.width, k.height); for (let i = 0; i < a.length; i += 4) d.data[i + 3] = a[i + 3]; x.putImageData(d, 0, 0); }
+      return k;
+    })();
+    const fit = Math.min(1, sizeCap(name) / Math.max(original.width, original.height));
     const c = createCanvas(Math.round(original.width * fit), Math.round(original.height * fit)), cc = c.getContext('2d'); cc.drawImage(original, 0, 0, c.width, c.height);
+    // global_lit_simple tints the colour (Kez's blade smear).
+    const tint = vector(p.g_vColorTint).slice(0, 3);
+    if (tint.length === 3 && tint.some((v) => v !== 1)) { cc.globalCompositeOperation = 'multiply'; cc.fillStyle = `rgb(${tint.map((v) => Math.round(Math.min(1, v) * 255)).join(',')})`; cc.fillRect(0, 0, c.width, c.height); cc.globalCompositeOperation = 'source-over'; }
     const trans = pick('_trans');
     if (trans) { const a = channel(await image(trans), c.width, c.height), d = cc.getImageData(0, 0, c.width, c.height);
       for (let i = 0; i < a.length; i += 4) d.data[i + 3] = a[i]; cc.putImageData(d, 0, 0); }
@@ -141,7 +180,7 @@ export async function buildHero({ game, cli, hero, out, temp, log = () => {} }) 
       normal: n ? await webp(n, join(out, 'textures', `${name}_normal.webp`), 92) : null, detail: detailName ? shared.get(detailName) || null : null, fresnel: warpName ? shared.get(warpName) || null : null,
       detailMode: +(p.F_DETAIL || 0), detailScale: vector(p.g_vDetailTexCoordScale).slice(0, 2), detailScroll: scroll ? [+scroll[1], +scroll[2]] : [0, 0], detailBlend: +(p.g_flDetailBlendFactor ?? 1),
       rimColor: vector(p.g_vRimLightColor).slice(0, 3), rimScale: +(p.g_flRimLightScale ?? 0), specColor: vector(p.g_vSpecularColor).slice(0, 3), specScale: +(p.g_flSpecularScale ?? 1),
-      specExponent: +(p.g_flSpecularExponent ?? 16), alphaTest: p.F_ALPHA_TEST === '1' ? +(p.g_flAlphaTestReference ?? 0.5) : 0, translucent: p.F_TRANSLUCENT === '1' || undefined,
+      specExponent: +(p.g_flSpecularExponent ?? 16), alphaTest: p.F_ALPHA_TEST === '1' ? +(p.g_flAlphaTestReference ?? 0.5) : 0, translucent: p.F_TRANSLUCENT === '1' || undefined, additive: p.F_ADDITIVE_BLEND === '1' || undefined,
     };
   }
 
@@ -245,6 +284,7 @@ export async function buildHero({ game, cli, hero, out, temp, log = () => {} }) 
 
   const manifest = {
     version: 1, id: hero.id, name: hero.name, models: modelFiles,
+    props: props.map((p) => ({ file: propFiles[propModels[p.model].name], sequence: p.sequence, frame: p.frame, clip: p.clip, loop: p.loop, attachment: p.attachment, parent: p.parent })).filter((p) => p.file),
     animations: { idle: animations.idle, entry: animations.entry, list: animations.list }, materials, lighting: hero.lighting,
     effects: effects.filter((e) => systems[e.system]).map((e) => ({ system: e.system, owner: modelFiles[e.owner] ? e.owner : 'hero' })),
     systems, textures, snapshots, attachments,
@@ -253,5 +293,5 @@ export async function buildHero({ game, cli, hero, out, temp, log = () => {} }) 
   // Last, once the snapshots were fitted to the plain models: pack the models.
   await compressHeroModels(join(out, 'models'));
   rmSync(temp, { recursive: true, force: true });
-  return { models: Object.keys(modelFiles), materials: Object.keys(materials).length, systems: Object.keys(systems).length, animations: animations.list.length };
+  return { models: [...Object.keys(modelFiles), ...Object.keys(propFiles)], materials: Object.keys(materials).length, systems: Object.keys(systems).length, animations: animations.list.length };
 }

@@ -96,18 +96,40 @@ const KEEP = /^ACT_DOTA_(LOADOUT|IDLE|IDLE_RARE|RUN|ATTACK|ATTACK2|CAST_ABILITY_
 const SKIP = { test: (a) => !KEEP.test(a) };
 const ORDER = ['ACT_DOTA_LOADOUT', 'ACT_DOTA_IDLE', 'ACT_DOTA_IDLE_RARE', 'ACT_DOTA_RUN', 'ACT_DOTA_ATTACK', 'ACT_DOTA_ATTACK2'];
 const TAIL = ['ACT_DOTA_SPAWN', 'ACT_DOTA_TELEPORT', 'ACT_DOTA_DISABLED', 'ACT_DOTA_VICTORY', 'ACT_DOTA_TAUNT', 'ACT_DOTA_DIE'];
+const debut = (s) => +(s.modifiers.includes('debut') || /debut/.test(s.name));
 export function pickAnimations(seqs, max = 24) {
   const best = new Map();
   for (const s of seqs) {
     if (!s.activity || s.name.startsWith('@') || SKIP.test(s.activity)) continue;
-    const cur = best.get(s.activity), score = s.modifiers.length * 1000 + s.name.length;
+    // Debut sequences are staged for the hero's release film (Kez stands off his pedestal in them).
+    const cur = best.get(s.activity), score = s.modifiers.length * 1000 + s.name.length + (debut(s) ? 5000 : 0);
     if (!cur || score < cur.score) best.set(s.activity, { ...s, score });
   }
   const rank = (a) => { const i = ORDER.indexOf(a), j = TAIL.indexOf(a); return i >= 0 ? i : j >= 0 ? 500 + j : 100; };
   const list = [...best.values()].sort((a, b) => rank(a.activity) - rank(b.activity) || a.activity.localeCompare(b.activity)).slice(0, max);
   // The hero page: the loadout spawn once (ACT_DOTA_SPAWN tagged «loadout», or named so), then the loadout idle.
   const spawn = seqs.filter((s) => s.activity === 'ACT_DOTA_SPAWN' && (s.modifiers.includes('loadout') || /loadout/.test(s.name)))
-    .sort((a, b) => a.modifiers.length - b.modifiers.length || a.name.length - b.name.length)[0];
+    .sort((a, b) => debut(a) - debut(b) || a.modifiers.length - b.modifiers.length || a.name.length - b.name.length)[0];
   const idle = best.get('ACT_DOTA_LOADOUT') || best.get('ACT_DOTA_IDLE') || list[0];
   return { idle: idle?.name || null, entry: spawn?.name || null, list: list.map(({ name, activity, loop }) => ({ name, activity, loop })) };
+}
+
+// Props an animation brings in (AE_CL_CREATE_ANIM_SCOPE_PROP: Pudge's clown car, Largo's frogs,
+// Ringmaster's box): a model of its own that lives while the animation plays, at the hero or one of
+// his attachments, playing the sequence of its own model named by the event's activity.
+// names: the hero's animations that are shown; '@'-prefixed sources of a sequence count as it.
+export function scopeProps(dump, names) {
+  const owners = [...dump.matchAll(/\n\t\t\tm_s?[Nn]ame = "([^"]+)"/g)].map((m) => [m.index, m[1]]), wanted = new Set(names), props = [], seen = new Set();
+  for (const m of dump.matchAll(/\n(\t+)\{\n\1\tm_nFrame = (-?\d+)([\s\S]*?)\n\1\}/g)) {
+    const body = m[3]; if (!body.includes('"AE_CL_CREATE_ANIM_SCOPE_PROP"')) continue;
+    const owner = owners.filter(([i]) => i < m.index).pop()?.[1]?.replace(/^@+/, '');
+    if (!wanted.has(owner)) continue;
+    const prop = {
+      sequence: owner, frame: +m[2], model: /name = resource:"([^"]+\.vmdl)"/.exec(body)?.[1], attachment: /attachment = "([^"]*)"/.exec(body)?.[1] || null,
+      parent: !/parent = false/.test(body), activity: /activity = "([^"]*)"/.exec(body)?.[1] || null,
+    };
+    const key = JSON.stringify(prop); if (!prop.model || seen.has(key)) continue;
+    seen.add(key); props.push(prop);
+  }
+  return props;
 }
