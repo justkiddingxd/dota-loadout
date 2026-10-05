@@ -19,16 +19,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
--------------------------------------------------------------------------------
-
-This license covers the code of this repository only (src/, tools/, site/).
-
-Everything under assets/heroes/ is derived from Dota 2's game files: models,
-textures, animations, particle systems, names and texts are the property of
-Valve Corporation. They are included for convenience and are not covered by the
-MIT license. Dota 2 is a registered trademark of Valve Corporation; this project
-is not affiliated with or endorsed by Valve.
-
-src/fx.js ports parts of Source 2 Viewer's particle simulation
-(https://github.com/ValveResourceFormat/ValveResourceFormat, MIT).

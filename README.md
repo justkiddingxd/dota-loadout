@@ -103,7 +103,7 @@ The game's files never leave your machine except as the archive you make yoursel
 
 ## License
 
-The code is [MIT](LICENSE). Models, textures, animations, particle systems and texts in
+The code is [MIT](LICENSE) (see also [NOTICE](NOTICE)). Models, textures, animations, particle systems and texts in
 `assets/heroes/` come from Dota 2 and belong to Valve Corporation; they are not covered by the MIT
 license. Dota 2 is a trademark of Valve; this project is not affiliated with Valve.
 
