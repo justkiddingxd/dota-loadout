@@ -100,7 +100,7 @@ class Particle {
     this.age = 0; this.life = c.life; this.alpha = c.alpha; this.alpha2 = 1; this.color = c.color.clone(); this.radius = c.radius; this.trail = 0.1;
     this.rot = new THREE.Vector3(0, 0, c.roll); this.rotSpeed = new THREE.Vector3(0, 0, c.rollSpeed); this.normal = new THREE.Vector3(0, 0, 1);
     this.seq = c.seq; this.seq2 = 0; this.created = 0; this.forceScale = 1; this.s = [0, 0, 0]; this.sv = new THREE.Vector3(); this.sv2 = new THREE.Vector3(); this.hbo = new THREE.Vector3();
-    this.id = 0; this.uid = 0; this.index = 0; this.dead = false; this.initial = null; this.bone = null; this.snap = -1; this.orient = null;
+    this.id = 0; this.uid = 0; this.index = 0; this.dead = false; this.initial = null; this.bone = null; this.surface = null; this.snap = -1; this.orient = null;
   }
   get nage() { return this.age / Math.max(1e-4, this.life); }
   getS(f) {
@@ -205,9 +205,31 @@ function vector(d, def = [0, 0, 0]) {
   if (Array.isArray(d)) { const v = vec(d); return () => v; }
   switch (d.m_nType) {
     case 'PVEC_TYPE_LITERAL': { const v = vec(d.m_vLiteralValue); return () => v; }
-    case 'PVEC_TYPE_PARTICLE_VECTOR': { const f = field(d.m_nVectorAttribute, F.Position); return (p) => (p ? p.getV(f).clone() : new THREE.Vector3()); }
-    case 'PVEC_TYPE_CP_VALUE': { const cp = d.m_nControlPoint ?? 0; return (p, s) => s.cp(cp).pos.clone(); }
+    case 'PVEC_TYPE_PARTICLE_VECTOR': case 'PVEC_TYPE_PARTICLE_INITIAL_VECTOR': {
+      const f = field(d.m_nVectorAttribute, F.Position), k = vec(d.m_vVectorAttributeScale, [1, 1, 1]), initial = d.m_nType === 'PVEC_TYPE_PARTICLE_INITIAL_VECTOR';
+      return (p) => (p ? (initial && p.initial ? p.initial : p).getV(f).clone().multiply(k) : new THREE.Vector3());
+    }
+    case 'PVEC_TYPE_CP_VALUE': { const cp = d.m_nControlPoint ?? 0, k = vec(d.m_vCPValueScale, [1, 1, 1]); return (p, s) => s.cp(cp).pos.clone().multiply(k); }
+    case 'PVEC_TYPE_CP_DELTA': { const cp = d.m_nControlPoint ?? 0, other = d.m_nDeltaControlPoint ?? 0, k = vec(d.m_vCPValueScale, [1, 1, 1]); return (p, s) => s.cp(cp).pos.clone().sub(s.cp(other).pos).multiply(k); }
+    // A point or a direction in a control point's own space.
+    case 'PVEC_TYPE_CP_RELATIVE_POSITION': { const cp = d.m_nControlPoint ?? 0, v = vec(d.m_vCPRelativePosition); return (p, s) => v.clone().applyMatrix4(s.cp(cp).matrix()); }
+    case 'PVEC_TYPE_CP_RELATIVE_DIR': { const cp = d.m_nControlPoint ?? 0, v = vec(d.m_vCPRelativeDir, [1, 0, 0]); return (p, s) => v.clone().applyQuaternion(s.cp(cp).quat); }
     case 'PVEC_TYPE_LITERAL_COLOR': { const c = d.m_LiteralColor || [255, 255, 255]; const v = new THREE.Vector3(c[0] / 255, c[1] / 255, c[2] / 255); return () => v; }
+    // Random between two corners, one draw per particle (as the floats' constant random mode), plus the literal.
+    case 'PVEC_TYPE_RANDOM_UNIFORM': case 'PVEC_TYPE_RANDOM_UNIFORM_OFFSET': {
+      const lo = vec(d.m_vRandomMin), hi = vec(d.m_vRandomMax), base = d.m_nType === 'PVEC_TYPE_RANDOM_UNIFORM_OFFSET' ? vec(d.m_vLiteralValue) : new THREE.Vector3(), salt = (number.salt = (number.salt || 0) + 3);
+      return (p) => { const r = (k) => (p ? hash(p.uid + p.sys.seed, salt + k) : rnd()); return new THREE.Vector3(lerp(lo.x, hi.x, r(0)), lerp(lo.y, hi.y, r(1)), lerp(lo.z, hi.z, r(2))).add(base); };
+    }
+    case 'PVEC_TYPE_FLOAT_COMPONENTS': { const x = number(d.m_FloatComponentX), y = number(d.m_FloatComponentY), z = number(d.m_FloatComponentZ); return (p, s) => new THREE.Vector3(x(p, s), y(p, s), z(p, s)); }
+    // A float mapped onto a line between two vectors (clamped to it or not), or onto a colour gradient.
+    case 'PVEC_TYPE_FLOAT_INTERP_CLAMPED': case 'PVEC_TYPE_FLOAT_INTERP_OPEN': case 'PVEC_TYPE_FLOAT_INTERP_GRADIENT': {
+      const f = number(d.m_FloatInterp), i0 = d.m_flInterpInput0 ?? 0, i1 = d.m_flInterpInput1 ?? 1, o0 = vec(d.m_vInterpOutput0), o1 = vec(d.m_vInterpOutput1, [1, 1, 1]);
+      const t = (p, s) => { const x = i1 === i0 ? 0 : (f(p, s) - i0) / (i1 - i0); return d.m_nType === 'PVEC_TYPE_FLOAT_INTERP_OPEN' ? x : saturate(x); };
+      if (d.m_nType !== 'PVEC_TYPE_FLOAT_INTERP_GRADIENT') return (p, s) => o0.clone().lerp(o1, t(p, s));
+      const stops = (d.m_Gradient?.m_Stops || []).map((g) => ({ at: g.m_flPosition ?? 0, c: new THREE.Vector3(...(g.m_Color || [255, 255, 255]).slice(0, 3)).divideScalar(255) })).sort((a, b) => a.at - b.at);
+      if (!stops.length) return () => new THREE.Vector3(1, 1, 1);
+      return (p, s) => { const x = t(p, s); if (x <= stops[0].at) return stops[0].c.clone(); for (let i = 1; i < stops.length; i++) if (x <= stops[i].at) { const a = stops[i - 1], b = stops[i]; return a.c.clone().lerp(b.c, b.at > a.at ? (x - a.at) / (b.at - a.at) : 1); } return stops[stops.length - 1].c.clone(); };
+    }
     default: { const v = vec(d.m_vLiteralValue, def); return () => v; }
   }
 }
@@ -338,7 +360,10 @@ const INIT = {
       p.pos.copy(snap.point(i, s.cp(cp).matrix())); p.prev.copy(p.pos); if (snap.data.bone && s.model) p.bone = s.model.bone(snap.data.bone); };
   },
   C_INIT_CreateOnModel(d) {
-    return (p, s) => { const m = s.model; if (!m) return; const bone = m.bones[Math.floor(rnd() * m.bones.length)]; if (!bone) return; p.bone = bone; p.pos.copy(m.bonePosition(bone)).add(inUnitBall().v.multiplyScalar(4)); };
+    return (p, s) => { const m = s.model; if (!m) return;
+      // On the model of what the effect is for (an item): a point of its surface, kept as it moves.
+      const at = m.surface?.(); if (at) { p.surface = at; p.pos.copy(at()); p.prev.copy(p.pos); return; }
+      const bone = m.bones[Math.floor(rnd() * m.bones.length)]; if (!bone) return; p.bone = bone; p.pos.copy(m.bonePosition(bone)).add(inUnitBall().v.multiplyScalar(4)); };
   },
 };
 function sphere(d, tr) {
@@ -621,6 +646,8 @@ function forwardBasis(forward) {
 }
 const OP = {
   C_OP_Decay: () => (ps) => { for (const p of ps) if (p.age > p.life) p.dead = true; },
+  // Those shrunk below a radius (1 by default) are gone.
+  C_OP_RadiusDecay(d) { const min = d.m_flMinRadius ?? 1; return (ps) => { for (const p of ps) if (p.radius < min) p.dead = true; }; },
   C_OP_BasicMovement(d) {
     const g = vector(d.m_Gravity), drag = number(d.m_fDrag);
     return (ps, dt, s) => {
@@ -718,7 +745,10 @@ const OP = {
   // Model-bound: particles ride the bones they were created on or the snapshot points they came from.
   C_OP_SnapshotSkinToBones(d) {
     const f0 = d.m_flLifeTimeFadeStart ?? 0, f1 = d.m_flLifeTimeFadeEnd ?? 0, cp = d.m_nControlPointNumber ?? 0;
-    return (ps, dt, s) => { const snap = s.snapshot(cp); if (!snap) return; for (const p of ps) { if (p.snap < 0) continue; const k = f1 > f0 ? 1 - saturate(remap(p.nage, f0, f1)) : 1; if (k <= 0) continue;
+    return (ps, dt, s) => { const snap = s.snapshot(cp);
+      // Without a snapshot, those born on an item's surface keep to their point of it.
+      if (!snap) { for (const p of ps) { if (!p.surface) continue; const k = f1 > f0 ? 1 - saturate(remap(p.nage, f0, f1)) : 1; if (k <= 0) continue; const delta = p.surface().clone().sub(p.pos).multiplyScalar(k); p.pos.add(delta); p.prev.add(delta); } return; }
+      for (const p of ps) { if (p.snap < 0) continue; const k = f1 > f0 ? 1 - saturate(remap(p.nage, f0, f1)) : 1; if (k <= 0) continue;
       const target = snap.point(p.snap); const delta = target.sub(p.pos).multiplyScalar(k); p.pos.add(delta); p.prev.add(delta); } };
   },
   C_OP_SnapshotRigidSkinToBones(d) { return OP.C_OP_SnapshotSkinToBones(d); },
@@ -923,7 +953,11 @@ const OP = {
     const out = field(d.m_nFieldOutput, F.Normal), a0 = vec(d.m_vecRotAxisMin, [0, 0, 1]), a1 = vec(d.m_vecRotAxisMax, [0, 0, 1]), r0 = d.m_flRotRateMin ?? 180, r1 = d.m_flRotRateMax ?? 180, normalize = d.m_bNormalize;
     return (ps, dt, s, str) => { for (const p of ps) { const ax = a0.clone().lerp(a1, hash(p.uid, 61)).normalize(), q = new THREE.Quaternion().setFromAxisAngle(ax, lerp(r0, r1, hash(p.uid, 62)) * Math.PI / 180 * dt * str); const v = p.getV(out).applyQuaternion(q); if (normalize) v.normalize(); } };
   },
-  C_OP_SetVec(d) { const v = vector(d.m_InputValue), out = field(d.m_nOutputField, F.Color); return (ps, dt, s) => { for (const p of ps) p.setV(out, v(p, s).clone()); }; },
+  // Set as the method says, eased in by m_Lerp and the operator's strength (a gem's CP, a colour's switch).
+  C_OP_SetVec(d) {
+    const v = vector(d.m_InputValue), out = field(d.m_nOutputField, F.Color), method = d.m_nSetMethod, lerpK = number(d.m_Lerp, 1);
+    return (ps, dt, s, k = 1) => { for (const p of ps) { const to = setVMethod(p, out, v(p, s), method, dt), t = lerpK(p, s) * Math.min(1, k); p.setV(out, t >= 1 ? to : p.getV(out).clone().lerp(to, t)); } };
+  },
   // The end cap (the effect stopped): its particles go after a time, a value going to another first.
   // Nothing before it, whatever the operator's end-cap state says (Marci's basket marks none).
   C_OP_EndCapTimedDecay(d) { const time = d.m_flDecayTime ?? 1; return (ps, dt, s) => { if (s.endedAt !== undefined && s.age - s.endedAt >= time) for (const p of ps) p.dead = true; }; },
@@ -1326,13 +1360,6 @@ export class Simulation {
     }
     this.delay = 0; this.stopped = false;
   }
-  // A prismatic gem in an item whose effects do not read one (made before Source 2's gem points,
-  // Shadow Fiend's Desolation): their colour is the gem's at their own brightness. null: their own.
-  setTint(color) {
-    for (const sim of this.all()) for (const r of sim.renderers) { const u = r.batch?.mesh.material.uniforms; if (!u || u.mode.value === 5) continue; u.tinted.value = !!color; if (color) u.tint.value.set(color.r, color.g, color.b); }
-  }
-  // Whether this system (or a child) reads a prismatic gem's control point itself.
-  get readsGem() { return this._readsGem ??= /"m_nCPInput":15\b/.test(JSON.stringify(this.def)) || this.children.some((c) => c.readsGem); }
   // No more particles from here on (the effect's animation ended): those alive live out their lives,
   // with the operators of the end cap.
   stopEmission() { for (const sim of this.all()) if (!sim.stopped) { sim.stopped = true; sim.state.endedAt = sim.state.age; } }
@@ -1398,12 +1425,11 @@ attribute vec4 color; attribute vec4 uvA; attribute vec4 uvB; attribute float bl
 varying vec4 vColor; varying vec2 vUvA; varying vec2 vUvB; varying float vBlend;
 void main() { vColor = color; vUvA = mix(uvA.xy, uvA.zw, uv); vUvB = mix(uvB.xy, uvB.zw, uv); vBlend = blend; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`;
 const fragmentShader = `
-uniform sampler2D map; uniform float overbright; uniform float addSelf; uniform bool saturateColor; uniform int mode; uniform bool blendFrames; uniform bool tinted; uniform vec3 tint;
+uniform sampler2D map; uniform float overbright; uniform float addSelf; uniform bool saturateColor; uniform int mode; uniform bool blendFrames;
 varying vec4 vColor; varying vec2 vUvA; varying vec2 vUvB; varying float vBlend;
 void main() {
   vec4 t = texture2D(map, vUvA); if (blendFrames) t = mix(t, texture2D(map, vUvB), vBlend);
   vec3 c = vColor.rgb * t.rgb; float a = t.a * vColor.a;
-  if (tinted) c = tint * max(c.r, max(c.g, c.b));
   if (mode == 5) { vec3 m = mix(vec3(0.5), mix(vec3(0.5), c, vColor.rgb), vec3(a)); gl_FragColor = vec4(clamp(m, 0.0, 1.0), a); return; }
   c *= overbright; if (saturateColor) c = clamp(c, 0.0, 1.0); c *= addSelf;
   gl_FragColor = vec4(c * a, mode == 1 ? 0.0 : a);
@@ -1414,7 +1440,7 @@ function material(tex, r) {
   const mode = r.m_nOutputBlendMode === 'PARTICLE_OUTPUT_BLEND_MODE_ADD' ? 1 : r.m_nOutputBlendMode === 'PARTICLE_OUTPUT_BLEND_MODE_MOD2X' ? 5 : 0;
   const m = new THREE.ShaderMaterial({
     vertexShader, fragmentShader, transparent: true, depthWrite: false, side: THREE.DoubleSide,
-    uniforms: { tinted: { value: false }, tint: { value: new THREE.Vector3(1, 1, 1) }, map: { value: tex }, overbright: { value: number(r.m_flOverbrightFactor, 1)(null, null) }, addSelf: { value: 1 + number(r.m_flAddSelfAmount, 0)(null, null) },
+    uniforms: { map: { value: tex }, overbright: { value: number(r.m_flOverbrightFactor, 1)(null, null) }, addSelf: { value: 1 + number(r.m_flAddSelfAmount, 0)(null, null) },
       saturateColor: { value: r.m_bSaturateColorPreAlphaBlend !== false }, mode: { value: mode }, blendFrames: { value: r.m_bBlendFramesSeq0 !== false } },
   });
   // Mod2x: colour = 2 × source × destination, so 50 % grey changes nothing. The canvas's alpha must
@@ -1464,7 +1490,7 @@ function sheetFrame(info, p, rate, type) {
   for (let i = 0; i < seq.frames.length; i++) { const f = seq.frames[i]; if (pos < f.time || i === seq.frames.length - 1) { const n = seq.clamp ? Math.min(i + 1, seq.frames.length - 1) : (i + 1) % seq.frames.length; return { a: f.uv, b: seq.frames[n].uv, fa: f, fb: seq.frames[n], t: f.time > 0 ? saturate(pos / f.time) : 0 }; } pos -= f.time; }
   return null;
 }
-const FULL = [0, 0, 1, 1];
+const FULL = [0, 0, 1, 1], Z = new THREE.Vector3(0, 0, 1);
 // Screen-facing basis in the particle space, from the camera.
 function billboard(camera, groupInverse) {
   const m = new THREE.Matrix3().setFromMatrix4(groupInverse.clone().multiply(camera.matrixWorld));
@@ -1478,6 +1504,9 @@ class SpriteRenderer {
     const t = lib.texture(r); this.info = t.info; this.batch = new QuadBatch(lib.group, t.texture, r, sim.maxParticles); this.rate = r.m_flAnimationRate ?? 0.1; this.type = r.m_nAnimationType;
     this.orient = r.m_nOrientationType; this.radiusScale = number(r.m_flRadiusScale, 1); this.alphaScale = number(r.m_flAlphaScale, 1);
     this.minSize = number(r.m_flMinSize, 0)(); this.maxSize = number(r.m_flMaxSize, 5000)(); this.fadeStart = number(r.m_flStartFadeSize, 1e8)(); this.fadeEnd = number(r.m_flEndFadeSize, 2e8)();
+    // Cards lying in a plane fade as they turn edge-on to the eye: full where the dot of their normal
+    // and the way to the eye is the start one, gone at the end one (the defaults, 1 and 2, never fade).
+    this.dotStart = r.m_flStartFadeDot ?? 1; this.dotEnd = r.m_flEndFadeDot ?? 2;
   }
   update(ps, s, camera, gi) {
     const b = this.batch, { right, up, eye } = billboard(camera, gi); b.begin();
@@ -1486,6 +1515,8 @@ class SpriteRenderer {
       const dist = eye.distanceTo(p.pos); let r = p.radius * this.radiusScale(p, s), fade = 1;
       if (r > this.fadeStart * dist) { if (r >= this.fadeEnd * dist) continue; fade = 1 - remap(r, this.fadeStart * dist, this.fadeEnd * dist); }
       r = Math.min(Math.max(r, this.minSize * dist), this.maxSize * dist);
+      const flat = this.orient === 'PARTICLE_ORIENTATION_ALIGN_TO_PARTICLE_NORMAL' ? p.normal : this.orient === 'PARTICLE_ORIENTATION_WORLD_Z_ALIGNED' ? Z : null;
+      if (flat && this.dotEnd < this.dotStart) { const d = Math.abs(flat.clone().normalize().dot(eye.clone().sub(p.pos).normalize())); fade *= saturate((d - this.dotEnd) / (this.dotStart - this.dotEnd)); }
       const a = p.alpha * this.alphaScale(p, s) * fade; if (r <= 0 || a < 1 / 255) continue;
       let R, U;
       if (this.orient === 'PARTICLE_ORIENTATION_ALIGN_TO_PARTICLE_NORMAL') { const n = p.normal.clone().normalize(), ref = Math.abs(n.z) > 0.1 ? new THREE.Vector3(0, -1, 0) : new THREE.Vector3(0, 0, 1); U = n.clone().cross(ref).normalize(); R = U.clone().cross(n); }
@@ -1569,16 +1600,19 @@ class ModelRenderer {
       if (!inst) {
         const m = this.lib.models.get(this.list[p.uid % Math.max(1, this.list.length)], this.activity, s.sim.def._path); if (!m) continue;
         const mixer = this.animated && m.clip ? new THREE.AnimationMixer(m.scene) : null; if (mixer) mixer.clipAction(m.clip).play();
-        m.scene.matrixAutoUpdate = false; this.lib.group.add(m.scene); inst = { scene: m.scene, mixer }; this.instances.set(p, inst);
+        m.scene.matrixAutoUpdate = false; this.lib.group.add(m.scene); inst = { scene: m.scene, mixer, materials: m.materials || [] }; this.instances.set(p, inst);
       }
+      // The particle's colour tints the model; its alpha fades those that blend (glows, glass).
+      for (const mat of inst.materials) { mat.color.setRGB(p.color.x, p.color.y, p.color.z); if (mat.transparent) mat.opacity = saturate(p.alpha); }
       alive.add(p);
       const q = p.orient || qangle(p.rot.y, p.rot.x, p.rot.z), r = Math.max(1e-4, p.radius);
       inst.scene.matrix.compose(p.pos, q, new THREE.Vector3(r, r, r)).multiply(GLTF_TO_SOURCE); inst.scene.matrixWorldNeedsUpdate = true; inst.scene.visible = p.alpha > 0.01;
       if (inst.mixer) inst.mixer.setTime(p.age * this.rate);
     }
-    for (const [p, inst] of this.instances) if (!alive.has(p)) { this.lib.group.remove(inst.scene); this.instances.delete(p); }
+    for (const [p, inst] of this.instances) if (!alive.has(p)) this.drop(p, inst);
   }
-  dispose() { for (const inst of this.instances.values()) this.lib.group.remove(inst.scene); this.instances.clear(); }
+  drop(p, inst) { this.lib.group.remove(inst.scene); for (const m of inst.materials) m.dispose(); this.instances.delete(p); }
+  dispose() { for (const [p, inst] of this.instances) this.drop(p, inst); }
 }
 
 export class Library {

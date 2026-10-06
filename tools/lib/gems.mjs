@@ -13,10 +13,12 @@ export function prismaticColors(game) {
     .map(([key, c]) => { const k = (c.color_name || '').toLowerCase(); return { key: key.replace(/^unusual_/, ''), hex: c.hex_color.toLowerCase(), name: { en: en[k] || key, ru: ru[k] || en[k] || key } }; });
 }
 
-// What gem an item's manifest (item.json) takes: true when one of its systems reads CP 15 (the
-// game's own recolouring), 'tint' when it has effects that do not (older items: the viewer tints
-// them), null without effects.
+// Whether an item's manifest (item.json) takes a gem: one of its own effects reads CP 15, the game's
+// recolouring (older effects, Shadow Fiend's Desolation, do not: the game takes no gem in them).
+// Unusual effects are left out: they are the item's other socket.
 export const takesPrismatic = (manifest) => {
-  if (/"m_nCPInput":15\b/.test(JSON.stringify(manifest.systems || {}))) return true;
-  return manifest.styles?.some((s) => s.effects?.length || Object.keys(s.particles || {}).length) ? 'tint' : null;
+  const systems = manifest.systems || {}, unusual = new Set();
+  const reach = (path) => { if (unusual.has(path) || !systems[path]) return; unusual.add(path); for (const c of systems[path].m_Children || []) reach(String(c.m_ChildRef || '').replace(/\.vpcf$/, '')); };
+  for (const u of manifest.unusual || []) reach(u.system);
+  return Object.entries(systems).some(([path, s]) => !unusual.has(path) && /"m_nCPInput":15\b/.test(JSON.stringify(s))) || null;
 };

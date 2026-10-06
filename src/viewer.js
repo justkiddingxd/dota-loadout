@@ -99,6 +99,8 @@ void main() {
   get worn() { return this.hero?.worn || {}; }
   // A prismatic gem in what a slot wears: '#rrggbb', or null.
   gem(slot, hex) { this.hero?.gem(slot, hex); }
+  // An unusual effect on what a slot wears: its id (the item's unusual list), or null.
+  unusual(slot, id) { this.hero?.unusual(slot, id); }
   unload() { if (!this.hero) return; this.scene.remove(this.hero.lib.group, this.hero.turntable); this.hero.dispose(); this.hero = null; }
 
   get animations() { return this.hero?.animations || []; }
@@ -329,11 +331,14 @@ async function buildHero(manifest, url, manager, time, light, textureScale = 1) 
     // the one of the renderer's activity.
     get(path, activity, system) {
       const info = manifest.fxModels?.[path], source = info && propModels[info.file]; if (!source) return null;
-      const scene = cloneSkinned(source.scene); dress(scene); scene.traverse((o) => { o.castShadow = false; });
+      // Materials of its own (an item's model has its item's): the particle tints them, each its own.
+      const scene = cloneSkinned(source.scene), mats = info.materials || manifest.materials, own = [];
+      scene.traverse((o) => { if (!o.isMesh) return; o.frustumCulled = false; o.castShadow = false; o.userData.material ??= o.material.name;
+        const m = mats[o.userData.material]; o.visible = !!m; if (!m) return; o.material = heroMaterial(m, info.texture || texture, time, light, info.cube || cube); own.push(o.material); });
       const words = (system || '').split('/').pop().split('_'), tail = (name) => { const w = name.split('_'); let k = 0; while (k < w.length && k < words.length && w[w.length - 1 - k] === words[words.length - 1 - k]) k++; return k; };
       const named = source.animations.map((c) => [c, tail(c.name)]).sort((a, b) => b[1] - a[1])[0];
       const clip = named && named[1] >= 2 ? named[0] : source.animations.find((c) => c.name === info.clips?.[activity]) || source.animations[0] || null;
-      return { scene, clip };
+      return { scene, clip, materials: own };
     },
   };
   // Items' particle textures come with full addresses.
@@ -382,8 +387,31 @@ async function buildHero(manifest, url, manager, time, light, textureScale = 1) 
     return c;
   };
   const follows = (d) => /FOLLOW|WORLDORIGIN/.test(d.type);
+  // Points on what a slot wears, for effects born on their model (C_INIT_CreateOnModel: an item's
+  // effects are on the item, unusual ones all over it): a triangle by its area, a point in it, and
+  // where that point is as the item moves (skinned); null when the slot shows nothing of its own.
+  const surfaces = new WeakMap();
+  const surfaceOf = (owner) => {
+    const meshes = worn.get(owner)?.meshes?.filter((m) => m.visible && m.geometry?.attributes.position); if (!meshes?.length) return null;
+    let s = surfaces.get(meshes[0]);
+    if (!s) {
+      const tris = [], a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3(); let total = 0;
+      for (const m of meshes) { const g = m.geometry, idx = g.index, n = idx ? idx.count : g.attributes.position.count, pos = g.attributes.position;
+        for (let i = 0; i + 2 < n; i += 3) { const i0 = idx ? idx.getX(i) : i, i1 = idx ? idx.getX(i + 1) : i + 1, i2 = idx ? idx.getX(i + 2) : i + 2;
+          a.fromBufferAttribute(pos, i0); b.fromBufferAttribute(pos, i1); c.fromBufferAttribute(pos, i2); total += b.sub(a).cross(c.sub(a)).length(); tris.push({ m, i: [i0, i1, i2], at: total }); } }
+      s = { tris, total }; surfaces.set(meshes[0], s);
+    }
+    return s.total ? s : null;
+  };
+  const surfacePoint = (owner) => {
+    const s = surfaceOf(owner); if (!s) return null;
+    const r = Math.random() * s.total; let lo = 0, hi = s.tris.length - 1; while (lo < hi) { const mid = (lo + hi) >> 1; if (s.tris[mid].at < r) lo = mid + 1; else hi = mid; }
+    const { m, i } = s.tris[lo]; let u = Math.random(), v = Math.random(); if (u + v > 1) { u = 1 - u; v = 1 - v; }
+    const w = [1 - u - v, u, v], p = new THREE.Vector3(), out = new THREE.Vector3();
+    return () => { out.set(0, 0, 0); for (let k = 0; k < 3; k++) out.addScaledVector(m.getVertexPosition(i[k], p), w[k]); return out.applyMatrix4(m.matrixWorld).applyMatrix4(groupInverse); };
+  };
   const instance = (def, owner, drivers) => {
-    const sim = new Simulation(def, lib); sim.model = model;
+    const sim = new Simulation(def, lib); sim.model = owner && owner !== 'hero' ? { ...model, surface: () => surfacePoint(owner) } : model;
     const e = { sim, owner, drivers, fixed: new Map() }, origin = heroOrigin();
     for (const d of drivers) if (!follows(d)) e.fixed.set(d.cp, placeCP(d, owner, origin));
     return e;
@@ -396,15 +424,12 @@ async function buildHero(manifest, url, manager, time, light, textureScale = 1) 
   const drive = (e, origin) => {
     const cps = e.sim.cps; cps.clear(); cps.set(0, cpOf(origin));
     const [color, on] = gemPoints(e.owner); cps.set(15, color); cps.set(16, on);
-    // An effect that does not read the gem takes its colour as a tint instead.
-    const g = gems.get(e.owner), tint = g && !e.sim.readsGem ? `${g.r},${g.g},${g.b}` : null;
-    if (tint !== e.tint) { e.tint = tint; e.sim.setTint(tint ? new THREE.Color(`rgb(${tint})`) : null); }
     for (const d of e.drivers) cps.set(d.cp, e.fixed.get(d.cp) || placeCP(d, e.owner, origin));
   };
   // The ambient effects: the hero's own and his items' — a slot's default ones only while it wears
   // its default. Worn items may put their own effects and snapshots in place of the hero's.
   let effects = [];
-  const replaced = new Map(), replacedBy = new Map();
+  const replaced = new Map(), replacedBy = new Map(), unusuals = new Map();
   const ambient = () => {
     for (const e of effects) e.sim.dispose();
     replaced.clear(); replacedBy.clear(); lib.aliases.clear();
@@ -413,6 +438,7 @@ async function buildHero(manifest, url, manager, time, light, textureScale = 1) 
     for (const [slot, r] of Object.entries(manifest.replace || {})) if (!worn.get(slot)?.item) for (const [from, to] of Object.entries(r)) replaced.set(from, to);
     for (const [slot, w] of worn) if (w.item) {
       for (const system of w.style.effects) list.push({ system, owner: slot });
+      const u = unusuals.has(slot) && w.unusual?.find((x) => x.id === unusuals.get(slot)); if (u) list.push({ system: u.system, owner: slot });
       // An effect an item puts in place of the hero's is the item's (its gem colours it).
       for (const [from, to] of Object.entries(w.style.particles)) { replaced.set(from, to); replacedBy.set(from, slot); }
       for (const [from, to] of Object.entries(w.style.snapshots)) lib.aliases.set(from, to);
@@ -484,6 +510,9 @@ async function buildHero(manifest, url, manager, time, light, textureScale = 1) 
       ambient();
     },
     get gems() { return Object.fromEntries([...gems].map(([slot, g]) => [slot, `#${((g.r << 16) | (g.g << 8) | g.b).toString(16).padStart(6, '0')}`])); },
+    // An unusual effect on a slot's item (an id of its manifest's unusual list, or null to take it off).
+    unusual(slot, id) { if (id == null) unusuals.delete(slot); else unusuals.set(slot, +id); ambient(); },
+    get unusuals() { return Object.fromEntries(unusuals); },
     // The meshes a slot wears now (for checks and tools).
     slotMeshes: (slot) => worn.get(slot)?.meshes || [],
     // What each slot wears: its item's id and style, or null for its default.
@@ -498,9 +527,9 @@ async function buildHero(manifest, url, manager, time, light, textureScale = 1) 
         if (!record) {
           const itemManager = new THREE.LoadingManager(), tex = textureOf(new THREE.TextureLoader(itemManager), source.url);
           const scenes = await Promise.all(s.models.map((n) => loader.loadAsync(source.url(m.models[n]))));
-          for (const [path, info] of Object.entries(m.fxModels || {})) { const file = source.url(info.file); propModels[file] ||= await loader.loadAsync(file); (manifest.fxModels ||= {})[path] ||= { file, clips: info.clips }; }
-          lib.add({ systems: m.systems, snapshots: m.snapshots, textures: Object.fromEntries(Object.entries(m.textures || {}).map(([k, v]) => [k, { ...v, file: source.url(`fx/${v.file}`) }])) });
           const itemCube = cubeOf(source.url, itemManager);
+          for (const [path, info] of Object.entries(m.fxModels || {})) { const file = source.url(info.file); propModels[file] ||= await loader.loadAsync(file); (manifest.fxModels ||= {})[path] ||= { file, clips: info.clips, materials: m.materials, texture: tex, cube: itemCube }; }
+          lib.add({ systems: m.systems, snapshots: m.snapshots, textures: Object.fromEntries(Object.entries(m.textures || {}).map(([k, v]) => [k, { ...v, file: source.url(`fx/${v.file}`) }])) });
           scenes.forEach((sc, i) => dress(sc.scene, m.materials, tex, source.url(''), itemCube, m.skins?.[s.models[i]]?.[(s.skin || 0) - 1]));
           await new Promise((done) => { if (!itemManager.itemsTotal || itemManager.itemsLoaded >= itemManager.itemsTotal) done(); else { itemManager.onLoad = done; itemManager.onError = () => {}; } });
           let companion = null;
@@ -520,7 +549,7 @@ async function buildHero(manifest, url, manager, time, light, textureScale = 1) 
       const old = worn.get(slot); if (old) takeOff(old);
       if (record.scenes && !record.meshes) { record.meshes = []; record.extra = []; for (const sc of record.scenes) { const w = fit(sc.scene); record.meshes.push(...w.meshes); record.extra.push(...w.extra); } }
       putOn(record);
-      worn.set(slot, { meshes: record.meshes, extra: record.extra, companion: record.companion, item: m ? m.id : null, style: s, styleIndex: m ? m.styles.indexOf(s) : 0 });
+      worn.set(slot, { meshes: record.meshes, extra: record.extra, companion: record.companion, item: m ? m.id : null, style: s, styleIndex: m ? m.styles.indexOf(s) : 0, unusual: m?.unusual || null });
       attachments[slot] = m ? record.attachments : manifest.attachments?.[slot];
       ambient(); remodify(); reskin();
     },

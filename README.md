@@ -107,6 +107,11 @@ npm run heroes -- --game .cache/steam/game/dota
 node tools/build-items.mjs --game .cache/steam/game/dota --cli .cache/vrf-20.0/Source2Viewer-CLI --only marci,juggernaut,pudge
 ```
 
+A worn item can take a prismatic gem when its effects read one, as in the game (`viewer.gem(slot, '#rrggbb')`;
+the catalog marks them `prismatic`), and an unusual effect when it can roll one: the effects of its
+season's list, Crownfall, Frostivus or New Bloom (`viewer.unusual(slot, 836)`; the catalog lists them
+under `unusual`). The site keeps both in the address: `#nevermore/arms=29087~creators_light!837`.
+
 Items go to `assets/items/<id>/` (models, materials and effects of all their styles), each hero's catalog
 to `assets/heroes/<id>/items.json`. They are not kept in git (about 250 KB an item, 10 000 items). Not
 done yet: taunts, pets, personas, arcanas and items that change animations.

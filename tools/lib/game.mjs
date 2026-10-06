@@ -231,6 +231,38 @@ export function particleEvents(dump, names) {
 // snapshots it replaces, its skin. What an item does that is not drawn on the hero (sounds, icons,
 // summons) is left out; what it would change and is not done yet (personas, arcanas, animations) is
 // named in `unsupported`.
+// Unusual effects an item can roll (static attribute "can roll unusual"): the effects of its season's
+// list (items_unusual_lists, <season>_unusual_list), the season by its event or by the treasure
+// (loot list <season>_…) that drops it or its set. The lists repeat their keys, so they are read raw.
+function unusualEffects(game, ig, text) {
+  const raw = read(game, 'scripts/items/items_game.txt').replace(/\r/g, '');
+  const block = (name) => { const i = raw.search(new RegExp(`\\n\\t"${name}"\\s*\\n\\t\\{`)); if (i < 0) return ''; const j = raw.indexOf('\n\t}', i + 1); return raw.slice(i, j); };
+  const lists = {};
+  for (const m of block('items_unusual_lists').matchAll(/\n\t\t"(\w+)_unusual_list"[^]*?\n\t\t\}/g)) lists[m[1]] = [...new Set([...m[0].matchAll(/effect: (\d+)/g)].map((e) => +e[1]))];
+  const seasons = Object.keys(lists).sort((a, b) => b.length - a.length);
+  // Each treasure (a loot list named for a season) and every name in it.
+  const drops = new Map();
+  for (const m of block('loot_lists').matchAll(/\n\t\t"(\w+)"\s*\n\t\t\{([^]*?)\n\t\t\}/g)) {
+    const season = seasons.find((s) => m[1].startsWith(s)); if (!season) continue;
+    for (const n of m[2].matchAll(/"([^"\n]+)"/g)) if (!drops.has(n[1])) drops.set(n[1], season);
+  }
+  // The bundles (sets in the store) an item comes in: treasures drop those by name.
+  const setNames = new Map();
+  for (const b of Object.values(ig.items)) if (b.prefab === 'bundle' && b.bundle && typeof b.bundle === 'object') for (const n of Object.keys(b.bundle)) setNames.set(n, [...(setNames.get(n) || []), b.name]);
+  const particles = ig.attribute_controlled_attached_particles || {};
+  return (item) => {
+    if (!+item.static_attributes?.['can roll unusual']) return null;
+    const event = (item.event_id || '').replace(/^EVENT_ID_/, '').toLowerCase();
+    const family = (s) => s.replace(/_\d{4}$/, '');
+    const season = seasons.find((s) => event && (event === s || s.startsWith(event))) || drops.get(item.name) || (setNames.get(item.name) || []).map((n) => drops.get(n)).find(Boolean)
+      // An older event's item (Frostivus 2018) rolls from the lists its event has now.
+      || seasons.find((s) => event && family(s) === family(event));
+    const list = (season && lists[season]) || [];
+    const effects = list.map((id) => ({ id, system: particles[id]?.system?.replace(/\.vpcf$/, ''), name: text(`Attrib_Particle${id}`) || { en: `#${id}`, ru: `#${id}` } })).filter((e) => e.system);
+    return effects.length ? effects : null;
+  };
+}
+
 export function loadCosmetics(game) {
   // The hero an item is for, short (a pet's loadout places are by it).
   const heroOf = (item) => Object.keys(item.used_by_heroes || {})[0]?.replace(/^npc_dota_hero_/, '');
@@ -244,6 +276,7 @@ export function loadCosmetics(game) {
   const byName = new Map(Object.entries(ig.items).map(([id, i]) => [i.name, +id]));
   const setOf = new Map();
   for (const [key, set] of Object.entries(ig.item_sets || {})) for (const name of Object.keys(set.items || {})) if (byName.has(name)) setOf.set(byName.get(name), key);
+  const unusualOf = unusualEffects(game, ig, text);
   const heroes = new Map();
   for (const [id, item] of Object.entries(ig.items)) {
     if (!(item.prefab === 'default_item' || item.prefab === 'wearable') || !item.used_by_heroes || typeof item.used_by_heroes !== 'object') continue;
@@ -275,11 +308,11 @@ export function loadCosmetics(game) {
         form: persona ? `persona${persona}` : (() => { const m = mine.find((x) => x.type === 'entity_model' && /^npc_dota_hero_/.test(x.asset || '') && /\.vmdl$/.test(x.modifier || '')); return m ? { npc: m.asset, model: m.modifier } : null; })(),
       };
     });
-    const unsupported = [...new Set(modifiers.map((m) => m.type).filter((t) => UNSUPPORTED.has(t)))];
+    const unsupported = [...new Set(modifiers.map((m) => m.type).filter((t) => UNSUPPORTED.has(t)))], unusual = unusualOf(item);
     for (const npc of Object.keys(item.used_by_heroes)) {
       const h = heroes.get(npc) || heroes.set(npc, { items: [] }).get(npc);
       h.items.push({ id: +id, name: text(item.item_name) || { en: item.name, ru: item.name }, slot: item.item_slot || ig.prefabs?.[item.prefab]?.item_slot || null, rarity: item.item_rarity || ig.prefabs?.[item.prefab]?.item_rarity || 'common',
-        default: item.prefab === 'default_item', set: setOf.get(+id) || null, styles, ...(unsupported.length ? { unsupported } : {}) });
+        default: item.prefab === 'default_item', set: setOf.get(+id) || null, styles, ...(unusual ? { unusual } : {}), ...(unsupported.length ? { unsupported } : {}) });
     }
   }
   for (const [npc, h] of heroes) {

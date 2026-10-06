@@ -1,6 +1,5 @@
 // Prismatic gems for the site: <out>/gems.json (the colours), and each hero's items.json marking the
-// items that take one (prismatic: true, or 'tint' for effects that do not read a gem; default items
-// take none). Runs after build-items.mjs; build-items marks them itself.
+// items that take one (prismatic: true; default items take none). Runs after build-items.mjs; build-items marks them itself.
 //   node tools/build-gems.mjs --game <…/dota> [--out assets]
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';

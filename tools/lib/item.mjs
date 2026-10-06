@@ -29,7 +29,8 @@ export async function buildItem({ game, cli, item, heroBones, out, temp, log = (
     const seqs = sequences(stdout).filter((s) => !s.name.startsWith('@') && s.name !== 'bindPose'), picked = pickAnimations(seqs);
     MODELS[`prop${i}`] = path; clipOf[`prop${i}`] = picked.idle || seqs.find((s) => s.loop)?.name || seqs[0]?.name || null;
   }
-  const effects = [...new Set(item.styles.flatMap((s) => [...s.effects, ...Object.values(s.particles)]))];
+  // With the unusual effects it can roll (worn on it whatever the style).
+  const effects = [...new Set([...item.styles.flatMap((s) => [...s.effects, ...Object.values(s.particles)]), ...(item.unusual || []).map((u) => u.system)])];
   const snapshots = [...new Set(item.styles.flatMap((s) => Object.values(s.snapshots)))].filter(has);
   const bundle = await buildBundle({ game, cli, out, temp, log, MODELS, kind: (name) => (/^prop/.test(name) ? 'prop' : 'worn'), animations: (name) => (clipOf[name] ? [clipOf[name]] : null), effects, heroBones, extraSnapshots: snapshots });
   const { modelFiles, fxFiles, fxModels, materials, systems, textures, attachments } = bundle;
@@ -51,6 +52,7 @@ export async function buildItem({ game, cli, item, heroBones, out, temp, log = (
   const manifest = {
     version: 1, id: item.id, slot: item.slot, models: modelFiles, materials, systems, textures, snapshots: bundle.snapshots, attachments, ...(Object.keys(bundle.skins).length ? { skins: bundle.skins } : {}),
     fxModels: Object.fromEntries(Object.entries(fxModels).filter(([, fx]) => fxFiles[fx.name]).map(([path, fx]) => [path, { file: fxFiles[fx.name], clips: fx.clips }])),
+    ...(item.unusual?.some((u) => systems[u.system]) ? { unusual: item.unusual.filter((u) => systems[u.system]) } : {}),
     styles: item.styles.map((s) => ({
       name: s.name, icon: icons[s.icon] || null, skin: s.skin, activities: s.activities || [], form: s.form || null,
       companion: (() => { const n = s.companion && nameOf[s.companion.model]; return n && modelFiles[n] ? { model: n, clip: clipOf[n], offset: s.companion.offset, scale: s.companion.scale } : null; })(),

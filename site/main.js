@@ -3,7 +3,7 @@ import { HeroViewer } from '../src/index.js';
 const T = {
   ru: {
     search: 'Найти героя', attrs: { str: 'Сила', agi: 'Ловкость', int: 'Интеллект', all: 'Универсал' }, short: { str: 'STR', agi: 'AGI', int: 'INT', all: 'UNI' },
-    animations: 'Анимации', items: 'Предметы', sets: 'Сеты', defaultItem: 'Стандартный', findItem: 'Найти предмет', style: 'Стиль', gem: 'Призматический самоцвет', gemTint: 'эффекты этого предмета не читают самоцвет: цвет наложен поверх', noGem: 'Без самоцвета', allDefault: 'Всё стандартное', noItems: 'Ничего не нашлось', reset: 'Сброс', embed: 'Встроить', copy: 'Копировать', copied: 'Скопировано',
+    animations: 'Анимации', items: 'Предметы', sets: 'Сеты', defaultItem: 'Стандартный', findItem: 'Найти предмет', style: 'Стиль', gem: 'Призматический самоцвет', noGem: 'Без самоцвета', unusual: 'Необычный эффект', noUnusual: 'Нет', allDefault: 'Всё стандартное', noItems: 'Ничего не нашлось', reset: 'Сброс', embed: 'Встроить', copy: 'Копировать', copied: 'Скопировано',
     loading: 'Загрузка', failed: 'Не удалось загрузить героя', nothing: 'Никого не нашлось',
     hint: 'Тяни, чтобы повернуть  ·  колесо — ближе / дальше', hintTouch: 'Тяни, чтобы повернуть',
     colophon: 'Герои Dota 2 прямо в браузере: игровой шейдер, анимации и эффекты частиц. Код открыт под MIT, модели и текстуры принадлежат Valve.',
@@ -14,7 +14,7 @@ const T = {
   },
   en: {
     search: 'Find a hero', attrs: { str: 'Strength', agi: 'Agility', int: 'Intelligence', all: 'Universal' }, short: { str: 'STR', agi: 'AGI', int: 'INT', all: 'UNI' },
-    animations: 'Animations', items: 'Items', sets: 'Sets', defaultItem: 'Default', findItem: 'Find an item', style: 'Style', gem: 'Prismatic gem', gemTint: 'this item’s effects do not read a gem: its colour is laid over them', noGem: 'No gem', allDefault: 'All default', noItems: 'Nothing found', reset: 'Reset', embed: 'Embed', copy: 'Copy', copied: 'Copied',
+    animations: 'Animations', items: 'Items', sets: 'Sets', defaultItem: 'Default', findItem: 'Find an item', style: 'Style', gem: 'Prismatic gem', noGem: 'No gem', unusual: 'Unusual effect', noUnusual: 'None', allDefault: 'All default', noItems: 'Nothing found', reset: 'Reset', embed: 'Embed', copy: 'Copy', copied: 'Copied',
     loading: 'Loading', failed: 'Could not load the hero', nothing: 'Nobody by that name',
     hint: 'Drag to turn  ·  wheel to zoom', hintTouch: 'Drag to turn',
     colophon: 'Dota 2 heroes live in the browser: the game’s hero shader, animations and particle effects. The code is MIT; models and textures belong to Valve.',
@@ -31,7 +31,7 @@ const stored = (() => { try { return localStorage.getItem('loadout-lang'); } cat
 let lang = stored || (/^(ru|uk|be|kk)/i.test(navigator.language) ? 'ru' : 'en');
 const t = () => T[lang];
 
-const state = { gems: {}, palette: [], index: null, heroes: [], current: null, filter: new Set(), query: '', active: null, playing: null, catalog: null, worn: {}, drawer: null, itemQuery: '' };
+const state = { gems: {}, unusual: {}, palette: [], index: null, heroes: [], current: null, filter: new Set(), query: '', active: null, playing: null, catalog: null, worn: {}, drawer: null, itemQuery: '' };
 
 // ---------------------------------------------------------------- viewer
 const canvas = $('[data-view]');
@@ -159,6 +159,7 @@ async function open(id) {
     state.catalog = await fetch(`heroes/${h.id}/items.json`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
     if (ticket !== loads) return;
     const asked = parseHash(); state.worn = valid(asked.worn); state.gems = Object.fromEntries(Object.entries(asked.gems).filter(([slot]) => state.worn[slot]));
+    state.unusual = Object.fromEntries(Object.entries(asked.unusual).filter(([slot]) => state.worn[slot]));
     await reload(ticket);
   } catch (e) {
     if (ticket !== loads) return;
@@ -183,19 +184,19 @@ async function reload(ticket = ++loads) {
   state.animations = loaded.animations; renderHero(h); mark(idleOf(h));
   writeHash(); renderRail(); if (state.drawer) renderDrawer();
   await Promise.all(Object.entries(state.worn).filter(([slot, w]) => w && applies(slot)).map(([slot, [id, style]]) => viewer.wear(slot, `items/${id}/`, style).catch((e) => console.error(e))));
-  applyGems();
+  applyGems(); applyUnusual();
 }
 
 // ---------------------------------------------------------------- wardrobe
 // The address keeps the hero and what he wears: #juggernaut/weapon=6058.1,head=7413 (item.style),
-// and a prismatic gem in an item: arms=8259~creators_light.
+// a prismatic gem in an item, and its unusual effect: arms=29087~creators_light!837.
 function parseHash() {
-  const [id, rest = ''] = decodeURIComponent(location.hash.slice(1)).split('/'), worn = {}, gems = {};
-  for (const part of rest.split(',')) { const m = /^(\w+)=(\d+)(?:\.(\d+))?(?:~(\w+))?$/.exec(part); if (m) { worn[m[1]] = [+m[2], +(m[3] || 0)]; if (m[4]) gems[m[1]] = m[4]; } }
-  return { id, worn, gems };
+  const [id, rest = ''] = decodeURIComponent(location.hash.slice(1)).split('/'), worn = {}, gems = {}, unusual = {};
+  for (const part of rest.split(',')) { const m = /^(\w+)=(\d+)(?:\.(\d+))?(?:~(\w+))?(?:!(\d+))?$/.exec(part); if (m) { worn[m[1]] = [+m[2], +(m[3] || 0)]; if (m[4]) gems[m[1]] = m[4]; if (m[5]) unusual[m[1]] = +m[5]; } }
+  return { id, worn, gems, unusual };
 }
 function writeHash() {
-  const parts = Object.entries(state.worn).filter(([, w]) => w).map(([slot, [id, style]]) => `${slot}=${id}${style ? `.${style}` : ''}${state.gems[slot] ? `~${state.gems[slot]}` : ''}`);
+  const parts = Object.entries(state.worn).filter(([, w]) => w).map(([slot, [id, style]]) => `${slot}=${id}${style ? `.${style}` : ''}${state.gems[slot] ? `~${state.gems[slot]}` : ''}${state.unusual[slot] ? `!${state.unusual[slot]}` : ''}`);
   history.replaceState(null, '', `#${state.current.id}${parts.length ? `/${parts.join(',')}` : ''}`);
 }
 const RARITY = { common: '#b0c3d9', uncommon: '#5e98d9', rare: '#4b69ff', mythical: '#8847ff', legendary: '#d32ce6', immortal: '#e4ae39', arcana: '#ade55c', ancient: '#eb4b4b', seasonal: '#fff34f' };
@@ -229,17 +230,25 @@ function setGem(slot, key) {
   viewer.gem(slot, gemHex(state.gems[slot]) || null); writeHash(); if (state.drawer) renderDrawer();
 }
 const applyGems = () => { for (const slot of Object.keys(state.gems)) if (takesGem(slot) && applies(slot)) viewer.gem(slot, gemHex(state.gems[slot])); else delete state.gems[slot]; };
+// Unusual effects: those the item in a slot can roll (its catalog's unusual list), one at a time.
+const unusualsOf = (slot) => { const w = state.worn[slot], it = w && state.catalog?.items[w[0]]; return (it && !it.default && it.unusual) || []; };
+function setUnusual(slot, id) {
+  if (id && unusualsOf(slot).some((u) => u.id === id)) state.unusual[slot] = id; else delete state.unusual[slot];
+  viewer.unusual(slot, state.unusual[slot] ?? null); writeHash(); if (state.drawer) renderDrawer();
+}
+const applyUnusual = () => { for (const slot of Object.keys(state.unusual)) if (applies(slot) && unusualsOf(slot).some((u) => u.id === state.unusual[slot])) viewer.unusual(slot, state.unusual[slot]); else delete state.unusual[slot]; };
 
 // Puts an item on (null or a default: the hero's own) and remembers it in the address.
 async function wear(slot, id, style = 0) {
   const it = id && state.catalog?.items[id];
   // A gem stays in the item it was put in; another item comes without.
-  if (state.worn[slot]?.[0] !== +id) { delete state.gems[slot]; viewer.gem(slot, null); }
+  if (state.worn[slot]?.[0] !== +id) { delete state.gems[slot]; viewer.gem(slot, null); delete state.unusual[slot]; viewer.unusual(slot, null); }
   state.worn[slot] = it && !it.default ? [+id, style] : null;
   if (formOf(state.worn) !== state.form) return reload();
   writeHash(); renderRail(); if (state.drawer) renderDrawer();
   await viewer.wear(slot, state.worn[slot] ? `items/${id}/` : null, style).catch((e) => console.error(e));
   if (state.gems[slot]) viewer.gem(slot, gemHex(state.gems[slot]));
+  if (state.unusual[slot]) viewer.unusual(slot, state.unusual[slot]);
 }
 // What the address asks for, on the slots it names; the others go back to their defaults.
 function dress(worn) {
@@ -296,9 +305,15 @@ function renderDrawer() {
   // A prismatic gem for what the slot wears, when it takes one.
   const gems = $('[data-gems]'); gems.hidden = !(takesGem(which) && state.palette.length);
   if (!gems.hidden) {
-    const now = state.gems[which] || null, label = el('span', { textContent: t().gem }); if (it.prismatic === 'tint') label.title = t().gemTint;
+    const now = state.gems[which] || null, label = el('span', { textContent: t().gem });
     const none = el('button', { type: 'button', className: 'none', title: t().noGem }); none.setAttribute('aria-pressed', !now); none.onclick = () => setGem(which, null);
     gems.replaceChildren(label, none, ...state.palette.map((g) => { const b = el('button', { type: 'button', title: g.name[lang] || g.name.en }); b.style.setProperty('--g', g.hex); b.setAttribute('aria-pressed', g.key === now); b.onclick = () => setGem(which, g.key); return b; }));
+  }
+  // The unusual effects it can roll.
+  const unusual = $('[data-unusual]'), rolls = unusualsOf(which); unusual.hidden = !rolls.length;
+  if (rolls.length) {
+    const now = state.unusual[which] ?? null, button = (text, id) => { const b = el('button', { type: 'button', textContent: text }); b.setAttribute('aria-pressed', id === now); b.onclick = () => setUnusual(which, id); return b; };
+    unusual.replaceChildren(el('span', { textContent: t().unusual }), button(t().noUnusual, null), ...rolls.map((u) => button(u.name[lang] || u.name.en, u.id)));
   }
 }
 $('[data-drawer-close]').onclick = closeDrawer;
@@ -325,10 +340,11 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'ArrowRight') viewer.rotate(0.6, { relative: true });
 });
 window.addEventListener('hashchange', () => {
-  const { id, worn, gems } = parseHash(); if (id !== state.current?.id) return open(id);
+  const { id, worn, gems, unusual } = parseHash(); if (id !== state.current?.id) return open(id);
   dress(worn);
   // The gems it names, in the items it names (those still loading take theirs when they are on).
   for (const slot of new Set([...Object.keys(state.gems), ...Object.keys(gems)])) { if (gems[slot] && state.worn[slot]) state.gems[slot] = gems[slot]; else delete state.gems[slot]; viewer.gem(slot, gemHex(state.gems[slot]) || null); }
+  for (const slot of new Set([...Object.keys(state.unusual), ...Object.keys(unusual)])) { if (unusual[slot] && state.worn[slot]) state.unusual[slot] = unusual[slot]; else delete state.unusual[slot]; viewer.unusual(slot, state.unusual[slot] ?? null); }
   writeHash(); if (state.drawer) renderDrawer();
 });
 

@@ -2,7 +2,7 @@
 // heroes: each item into <out>/items/<id>/ (tools/lib/item.mjs), and each hero's catalog into
 // <out>/heroes/<hero>/items.json — his slots, the items for each, their styles and sets.
 //   node tools/build-items.mjs --game <…/dota> --only marci,juggernaut --cli <Source2Viewer-CLI>
-// Options: --out assets   --jobs 4   --keep (skip built items)
+// Options: --out assets   --jobs 4   --keep (skip built items)   --items <id,…> (build these even with --keep)
 // Left out for now: slots not worn on the hero (taunts, pets, voices, personas, ability effects,
 // statues) and items that change the hero himself (arcanas, personas: loadCosmetics' unsupported).
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -14,7 +14,7 @@ import { buildItem } from './lib/item.mjs';
 
 const args = process.argv.slice(2), opt = (name, fallback) => { const i = args.indexOf(`--${name}`); return i < 0 ? fallback : args[i + 1]; }, flag = (name) => args.includes(`--${name}`);
 const game = resolve(opt('game', '.cache/game/dota')), out = resolve(opt('out', 'assets')), jobs = +opt('jobs', 4), cli = opt('cli') && resolve(opt('cli'));
-const only = (opt('only', '') || '').split(',').filter(Boolean);
+const only = (opt('only', '') || '').split(',').filter(Boolean), redo = new Set((opt('items', '') || '').split(',').filter(Boolean).map(Number));
 if (!cli) throw new Error('--cli <Source2Viewer-CLI> is needed');
 const CACHE = resolve('.cache');
 const NOT_WORN = /taunt|voice|ability_effects|effigy|costume|ward|courier|loading_screen|announcer|music|hud|cursor|weather|terrain|emblem|multikill|streak|death_effects/;
@@ -41,7 +41,7 @@ for (const hero of list) {
   const worker = async () => {
     while (next < items.length) {
       const item = items[next++], dir = join(out, 'items', String(item.id));
-      if (flag('keep') && existsSync(join(dir, 'item.json'))) { built[item.id] = { worn: true }; done++; continue; }
+      if (flag('keep') && !redo.has(item.id) && existsSync(join(dir, 'item.json'))) { built[item.id] = { worn: true }; done++; continue; }
       const log = [];
       try { built[item.id] = await buildItem({ game, cli, item, heroBones: heroBones(item.slot), out: dir, temp: join(CACHE, 'temp', `item${item.id}`), log: (l) => log.push(l) }); }
       catch (e) { built[item.id] = { error: e.message.split('\n')[0] }; }
@@ -59,6 +59,7 @@ for (const hero of list) {
     slots: c.slots.filter((s) => ok.some((i) => i.slot === s.name)).map((s) => ({ name: s.name, text: s.text, ...(/_persona_(\d+)$/.test(s.name) ? { persona: +/_persona_(\d+)$/.exec(s.name)[1] } : {}), items: ok.filter((i) => i.slot === s.name).sort((a, b) => b.default - a.default || b.id - a.id).map((i) => i.id) })),
     items: Object.fromEntries(ok.map((i) => [i.id, { name: i.name, slot: i.slot, rarity: i.rarity, default: i.default || undefined, set: i.set || undefined,
       prismatic: (!i.default && takesPrismatic(manifests[i.id])) || undefined,
+      unusual: manifests[i.id].unusual?.map((u) => ({ id: u.id, name: u.name })),
       styles: manifests[i.id].styles.map((s) => ({ name: s.name, icon: s.icon, ...(s.form ? { form: s.form } : {}) })) }])),
     sets: c.sets.map((s) => ({ ...s, items: s.items.filter((id) => manifests[id]) })).filter((s) => s.items.length > 1),
   };
