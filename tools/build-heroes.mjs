@@ -64,6 +64,12 @@ async function worker() {
     try {
       const r = await buildHero({ game, cli, hero, out: dir, temp: join(CACHE, 'temp', hero.id), log: (line) => log.push(line) });
       results[hero.id] = r;
+      // His forms (personas, arcanas that change his model): heroes of their own in forms/<key>/.
+      for (const form of hero.forms || []) {
+        try { await buildHero({ game, cli, hero: { ...hero, model: form.model, wearables: form.wearables, effects: form.effects, activities: form.activities, replace: form.replace }, out: join(dir, 'forms', form.key), temp: join(CACHE, 'temp', `${hero.id}-${form.key}`), log: (line) => log.push(line) }); }
+        catch (e) { log.push(`  form ${form.key}: ${e.message.split('\n')[0]}`); }
+      }
+      if (hero.forms?.length) r.models.push(`${hero.forms.length} forms`);
       console.log(`[${++done}/${build.length}] ${hero.name.en}: ${r.models.join(', ')}; ${r.materials} материалов, ${r.animations} анимаций, ${r.systems} систем частиц (${((Date.now() - t) / 1000).toFixed(0)} с)`);
     } catch (e) {
       results[hero.id] = { error: e.message };

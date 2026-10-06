@@ -38,8 +38,8 @@ export async function buildHero({ game, cli, hero, out, temp, log = () => {} }) 
   if (hero.pedestal && has(hero.pedestal)) MODELS.pedestal = hero.pedestal;
   if (!has(hero.model)) throw new Error(`no ${hero.model}`);
   const heroDump = await run(['-i', join(game, `${hero.model}_c`), '-a']);
-  const animations = pickAnimations(sequences(heroDump));
-  const wanted = [...new Set([animations.entry, animations.idle, ...animations.list.map((a) => a.name)].filter(Boolean))];
+  const animations = pickAnimations(sequences(heroDump), 24, hero.activityTags || []);
+  const wanted = [...new Set([animations.entry, animations.idle, ...animations.list.map((a) => a.name), ...animations.variants.map((a) => a.name)].filter(Boolean))];
 
   // Props of those animations, one model file each, with the clips the events ask for: the sequence
   // named by the event's activity, or having it as activity, or the model's only one.
@@ -56,9 +56,11 @@ export async function buildHero({ game, cli, hero, out, temp, log = () => {} }) 
   const isProp = (name) => /^prop\d+$/.test(name);
   const events = particleEvents(heroDump, wanted).filter((e) => has(`${e.system}.vpcf`));
 
-  const bundle = await buildBundle({ game, cli, out, temp, log, MODELS, kind: (name) => (name === 'hero' || name === 'pedestal' ? name : isProp(name) ? 'prop' : 'worn'), effects: [...hero.effects.map((e) => e.system), ...events.map((e) => e.system)],
+  // The default items' replacements of the hero's effects: built, and swapped in by the viewer.
+  const replace = hero.replace || {}, replacing = Object.values(replace).flatMap((r) => Object.values(r));
+  const bundle = await buildBundle({ game, cli, out, temp, log, MODELS, kind: (name) => (name === 'hero' || name === 'pedestal' ? name : isProp(name) ? 'prop' : 'worn'), effects: [...hero.effects.map((e) => e.system), ...events.map((e) => e.system), ...replacing],
     animations: (name) => (isProp(name) ? [...Object.values(propModels).find((m) => m.name === name).clips] : name === 'hero' ? wanted : null) });
-  const { modelFiles, fxFiles, fxModels, materials, systems, textures, snapshots, attachments } = bundle;
+  const { modelFiles, fxFiles, fxModels, materials, systems, textures, snapshots, attachments, skins } = bundle;
   // Props are not worn: they leave the models list for one of their own.
   const propFiles = {};
   for (const name of Object.keys(modelFiles).filter(isProp)) { propFiles[name] = modelFiles[name]; delete modelFiles[name]; }
@@ -68,11 +70,12 @@ export async function buildHero({ game, cli, hero, out, temp, log = () => {} }) 
   const manifest = {
     version: 1, id: hero.id, name: hero.name, models: modelFiles,
     props: props.map((p) => ({ file: propFiles[propModels[p.model].name], sequence: p.sequence, frame: p.frame, clip: p.clip, loop: p.loop, attachment: p.attachment, parent: p.parent })).filter((p) => p.file),
-    animations: { idle: animations.idle, entry: animations.entry, list: animations.list }, materials, lighting: hero.lighting,
+    animations: { idle: animations.idle, entry: animations.entry, list: animations.list, variants: animations.variants, defaults: hero.activities || {} }, materials, lighting: hero.lighting,
     effects: effects.filter((e) => systems[e.system]).map((e) => ({ system: e.system, owner: modelFiles[e.owner] ? e.owner : 'hero' })),
     events: events.filter((e) => systems[e.system]),
     fxModels: Object.fromEntries(Object.entries(fxModels).filter(([, fx]) => fxFiles[fx.name]).map(([path, fx]) => [path, { file: fxFiles[fx.name], clips: fx.clips }])),
-    systems, textures, snapshots, attachments,
+    ...(Object.keys(replace).length ? { replace: Object.fromEntries(Object.entries(replace).map(([slot, r]) => [slot, Object.fromEntries(Object.entries(r).filter(([, to]) => systems[to]))])) } : {}),
+    systems, textures, snapshots, attachments, ...(Object.keys(skins).length ? { skins } : {}),
   };
   writeFileSync(join(out, 'hero.json'), JSON.stringify(manifest));
   // Last, once the snapshots were fitted to the plain models: pack the models.
@@ -136,7 +139,7 @@ export async function buildBundle({ game, cli, out, temp, log = () => {}, MODELS
     return refs;
   };
 
-  const materials = {}, modelFiles = {};
+  const materials = {}, modelFiles = {}, skins = {};
   for (const [name, path] of Object.entries(MODELS)) {
     const dir = join(temp, 'glb', name), file = join(dir, `${name}.glb`); mkdirSync(dir, { recursive: true });
     const args = ['-i', join(game, `${path}_c`), '--game', gameinfo, '-o', file, '-d', '--gltf_export_format', 'glb', '--gltf_export_materials', '--gltf_textures_adapt'];
@@ -166,6 +169,14 @@ export async function buildBundle({ game, cli, out, temp, log = () => {}, MODELS
     writeGlb(join(out, 'models', `${name}.glb`), json, compact(json, bin));
     modelFiles[name] = `models/${name}.glb`;
     for (const ref of references(path)) if (ref.endsWith('.vmat')) materials[basename(ref, '.vmat')] = { ...materials[basename(ref, '.vmat')], vmat: ref };
+    // Skins (material groups): the default group's materials and each other's in their place, built
+    // too, with the default's normal map (the same mesh and UVs). skins[name][k - 1] for skin k.
+    const groups = [...(await run(['-i', join(game, `${path}_c`), '-a'])).matchAll(/\n\t\t\{\n\t\t\tm_name = "[^"]*"\n\t\t\tm_materials = \n\t\t\t\[([\s\S]*?)\n\t\t\t\]/g)]
+      .map((g) => [...g[1].matchAll(/resource:"([^"]+\.vmat)"/g)].map((m) => m[1]));
+    if (groups.length > 1 && groups[0].length) {
+      skins[name] = groups.slice(1).map((g) => Object.fromEntries(groups[0].map((p, i) => [basename(p, '.vmat'), basename(g[i] || p, '.vmat')])));
+      for (const g of groups.slice(1)) g.forEach((p, i) => { const k = basename(p, '.vmat'), from = materials[basename(groups[0][i] || '', '.vmat')]; materials[k] = { ...materials[k], vmat: p, normalFile: materials[k]?.normalFile || from?.normalFile || null }; });
+    }
   }
   const fxFiles = {};
   for (const name of Object.keys(modelFiles).filter(isFx)) { fxFiles[name] = modelFiles[name]; delete modelFiles[name]; }
@@ -223,12 +234,13 @@ export async function buildBundle({ game, cli, out, temp, log = () => {}, MODELS
       for (let i = 0; i < a.length; i += 4) d.data[i + 3] = a[i]; cc.putImageData(d, 0, 0); }
     // Masks: R detail (where the fire shows), G self-illumination, B rim light; saved lossless (lossy
     // WebP halves the colour resolution and bleeds one mask into another along thin trims).
-    const ms = Math.min(c.width, 512), layers = await Promise.all(['_detailmask', '_selfillummask', '_rimmask'].map(async (s) => (pick(s) ? channel(await image(pick(s)), ms) : null)));
+    // Masks: R detail, G self-illumination, B rim, A where the diffuse warp applies (all of it without one).
+    const ms = Math.min(c.width, 512), layers = await Promise.all(['_detailmask', '_selfillummask', '_rimmask', '_diffusemask'].map(async (s) => (pick(s) ? channel(await image(pick(s)), ms) : null)));
     const specLayers = await Promise.all(['_specmask', '_metalnessmask', '_basetintmask'].map(async (s) => (pick(s) ? channel(await image(pick(s)), ms) : null)));
     const pack = async (list, file) => {
       if (!list.some(Boolean)) return null;
       const canvas = createCanvas(ms, ms), ctx = canvas.getContext('2d'), d = ctx.createImageData(ms, ms);
-      for (let i = 0; i < d.data.length; i += 4) { for (let k = 0; k < 3; k++) d.data[i + k] = list[k] ? list[k][i] : 0; d.data[i + 3] = 255; }
+      for (let i = 0; i < d.data.length; i += 4) { for (let k = 0; k < 3; k++) d.data[i + k] = list[k] ? list[k][i] : 0; d.data[i + 3] = list[3] ? list[3][i] : 255; }
       ctx.putImageData(d, 0, 0); return lossless(canvas, file);
     };
     // Specular texture: R specular, G metalness, B «tint specular by base colour» (Dota's masks).
@@ -243,6 +255,24 @@ export async function buildBundle({ game, cli, out, temp, log = () => {}, MODELS
       const wdir = join(temp, 'warp', warpName); await decompile(`${warp}.vtex`, join(wdir, 'warp.png'));
       const f = readdirSync(wdir).find((x) => x.endsWith('.png')); if (f) shared.set(warpName, await lossless(readPng(join(wdir, f)), join(out, 'textures', `${warpName}.webp`)));
     }
+    // The diffuse warp (F_DIFFUSE_WARP): the light's ramp by half-Lambert, shared.
+    const diffuseWarp = p.F_DIFFUSE_WARP === '1' && /"g_tDiffuseWarp"\s+"([^"]+)\.vtex"/.exec(text)?.[1], diffuseName = diffuseWarp ? `${basename(diffuseWarp).replace(/_tga_|_psd_|_png_/, '_')}_warp` : null;
+    if (diffuseWarp && !shared.has(diffuseName) && has(`${diffuseWarp}.vtex`)) {
+      const wdir = join(temp, 'dwarp', diffuseName); await decompile(`${diffuseWarp}.vtex`, join(wdir, 'warp.png'));
+      const f = readdirSync(wdir).find((x) => x.endsWith('.png')); if (f) shared.set(diffuseName, await lossless(readPng(join(wdir, f)), join(out, 'textures', `${diffuseName}.webp`)));
+    }
+    // The cube map (F_SPECULAR_CUBE_MAP): its six faces in a strip, in the game's axes +X −X +Y −Y +Z −Z
+    // (rt lf bk ft up dn), 128 px each; shared.
+    const cube = p.F_SPECULAR_CUBE_MAP === '1' && /"g_tCubeMap"\s+"([^"]+)\.vtex"/.exec(text)?.[1], cubeName = cube ? `${basename(cube).replace(/_tga_|_psd_|_png_/, '_')}_cube` : null;
+    if (cube && !shared.has(cubeName) && has(`${cube}.vtex`)) {
+      const cdir = join(temp, 'cube', cubeName); await decompile(`${cube}.vtex`, join(cdir, 'cube.png'));
+      const faces = ['rt', 'lf', 'bk', 'ft', 'up', 'dn'].map((s) => readdirSync(cdir).find((x) => x.endsWith(`_${s}.png`)));
+      if (faces.every(Boolean)) {
+        const size = 128, strip = createCanvas(size * 6, size), sc = strip.getContext('2d');
+        for (const [i, f] of faces.entries()) sc.drawImage(await image(join(cdir, f)), i * size, 0, size, size);
+        shared.set(cubeName, await webp(strip, join(out, 'textures', `${cubeName}.webp`), 92));
+      }
+    }
     const detailName = p.TextureDetail && !/default_detail/.test(p.TextureDetail) ? basename(p.TextureDetail).replace(/\.\w+$/, '') : null;
     if (detailName && !shared.has(detailName)) { const f = pick(detailName) || join(dir, basename(p.TextureDetail)); if (existsSync(f)) { const d = await image(f), dc = createCanvas(Math.min(d.width, 1024), Math.min(d.height, 1024)); dc.getContext('2d').drawImage(d, 0, 0, dc.width, dc.height); shared.set(detailName, await webp(dc, join(out, 'textures', `${detailName}.webp`))); } }
     materials[name] = {
@@ -250,6 +280,8 @@ export async function buildBundle({ game, cli, out, temp, log = () => {}, MODELS
       normal: n ? await webp(n, join(out, 'textures', `${name}_normal.webp`), 92) : null, detail: detailName ? shared.get(detailName) || null : null, fresnel: warpName ? shared.get(warpName) || null : null,
       detailMode: +(p.F_DETAIL || 0), detailScale: vector(p.g_vDetailTexCoordScale).slice(0, 2), detailScroll: scroll ? [+scroll[1], +scroll[2]] : [0, 0], detailBlend: +(p.g_flDetailBlendFactor ?? 1),
       rimColor: vector(p.g_vRimLightColor).slice(0, 3), rimScale: +(p.g_flRimLightScale ?? 0), specColor: vector(p.g_vSpecularColor).slice(0, 3), specScale: +(p.g_flSpecularScale ?? 1),
+      diffuseWarp: diffuseName ? shared.get(diffuseName) || undefined : undefined,
+      cube: cubeName ? shared.get(cubeName) || undefined : undefined, cubeScale: cubeName ? +(p.g_flCubeMapScalar ?? 1) : undefined, cubeByMetalness: p.F_MASK_CUBE_MAP_BY_METALNESS === '1' || undefined,
       specExponent: +(p.g_flSpecularExponent ?? 16), alphaTest: p.F_ALPHA_TEST === '1' ? +(p.g_flAlphaTestReference ?? 0.5) : 0, translucent: p.F_TRANSLUCENT === '1' || undefined, additive: p.F_ADDITIVE_BLEND === '1' || undefined,
     };
   }
@@ -343,5 +375,5 @@ export async function buildBundle({ game, cli, out, temp, log = () => {}, MODELS
     attachments[name] = list;
   }
 
-  return { modelFiles, fxFiles, fxModels, materials, systems, textures, snapshots, attachments };
+  return { modelFiles, fxFiles, fxModels, materials, systems, textures, snapshots, attachments, skins };
 }

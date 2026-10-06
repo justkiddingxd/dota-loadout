@@ -5,3 +5,4 @@ dist/
 !tools/*.zip
 assets/items/
 assets/heroes/*/items.json
+assets/heroes/*/forms/

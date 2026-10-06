@@ -190,6 +190,18 @@ const fetchHero = (base) => fetchJson(base, 'hero.json');
 async function buildHero(manifest, url, manager, time, light) {
   const made = [], textureOf = (loader, address) => (file, srgb = false) => { const t = loader.load(address(`textures/${file}`)); t.flipY = false; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace; t.anisotropy = 4; made.push(t); return t; };
   const texture = textureOf(new THREE.TextureLoader(manager), url);
+  // Cube maps from their strip of faces (+X −X +Y −Y +Z −Z in the game's axes), one of each.
+  const cubes = new Map();
+  const cubeOf = (address, loading) => (file) => {
+    const href = address(`textures/${file}`); if (cubes.has(href)) return cubes.get(href);
+    const t = new THREE.CubeTexture(); t.colorSpace = THREE.SRGBColorSpace; cubes.set(href, t); made.push(t);
+    new THREE.ImageLoader(loading).load(href, (img) => {
+      const s = img.height; t.images = [0, 1, 2, 3, 4, 5].map((i) => { const c = document.createElement('canvas'); c.width = c.height = s; c.getContext('2d').drawImage(img, i * s, 0, s, s, 0, 0, s, s); return c; });
+      t.needsUpdate = true;
+    });
+    return t;
+  };
+  const cube = cubeOf(url, manager);
   // The models are packed with EXT_meshopt_compression (tools/compress.mjs).
   const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
   const names = Object.keys(manifest.models), loaded = Object.fromEntries(await Promise.all(names.map(async (k) => [k, await loader.loadAsync(url(manifest.models[k]))])));
@@ -213,21 +225,33 @@ async function buildHero(manifest, url, manager, time, light) {
     // Unskinned items stay as they are, beside the hero.
     return { meshes: [...skinned, ...rigid], extra };
   };
-  const putOn = (w) => { for (const x of w.extra) { x.parent.add(x.bone); bones[x.key] = x.bone; inverses[x.key] = x.inverse; } for (const m of w.meshes) root.add(m); };
-  const takeOff = (w) => { for (const m of w.meshes) root.remove(m); for (const x of w.extra) { x.bone.parent?.remove(x.bone); if (bones[x.key] === x.bone) delete bones[x.key]; if (inverses[x.key] === x.inverse) delete inverses[x.key]; } };
+  // A companion (a pet, a summoned unit's look) stands beside the hero on the turntable.
+  const putOn = (w) => { for (const x of w.extra) { x.parent.add(x.bone); bones[x.key] = x.bone; inverses[x.key] = x.inverse; } for (const m of w.meshes) root.add(m); if (w.companion) turntable.add(w.companion.group); };
+  const takeOff = (w) => { if (w.companion) w.companion.group.removeFromParent(); for (const m of w.meshes) root.remove(m); for (const x of w.extra) { x.bone.parent?.remove(x.bone); if (bones[x.key] === x.bone) delete bones[x.key]; if (inverses[x.key] === x.inverse) delete inverses[x.key]; } };
   const items = names.filter((k) => k !== 'hero' && k !== 'pedestal'), defaults = new Map(), worn = new Map(), wearing = new Map();
+  const heroMeshes = []; root.traverse((o) => { if (o.isMesh) heroMeshes.push(o); });
   for (const name of items) { const w = fit(loaded[name].scene); defaults.set(name, w); worn.set(name, { ...w, item: null }); putOn(w); }
   const turntable = new THREE.Group(); turntable.add(root); if (loaded.pedestal) turntable.add(loaded.pedestal.scene);
   const materials = new Map();
   // An item's materials come with it, their textures from its folder: keyed by both.
-  const dress = (group, mats = manifest.materials, tex = texture, base = '') => group.traverse((o) => {
-    if (!o.isMesh) return; o.frustumCulled = false; o.castShadow = o.receiveShadow = true;
+  // skin: the materials a skin (material group) puts in place of the default ones, by name.
+  const dressMesh = (o, mats = manifest.materials, tex = texture, base = '', cubeMap = cube, skin = null) => {
+    o.frustumCulled = false; o.castShadow = o.receiveShadow = true;
     // A mesh whose material did not come with the hero (an additive glow, a motion smear) is hidden
-    // rather than drawn plain white.
-    const key = o.material.name, m = mats[key]; if (!m) { o.visible = false; return; }
-    if (!materials.has(base + key)) materials.set(base + key, heroMaterial(m, tex, time, light)); o.material.dispose(); o.material = materials.get(base + key);
-  });
+    // rather than drawn plain white. Its own material's name is kept for changing skins later.
+    o.userData.material ??= o.material.name;
+    const key = skin?.[o.userData.material] ?? o.userData.material, m = mats[key]; o.visible = !!m; if (!m) return;
+    if (!materials.has(base + key)) materials.set(base + key, heroMaterial(m, tex, time, light, cubeMap));
+    if (!o.material.userData.hero) o.material.dispose(); // the loader's; ours are shared
+    o.material = materials.get(base + key);
+  };
+  const dress = (group, ...rest) => group.traverse((o) => { if (o.isMesh) dressMesh(o, ...rest); });
   dress(turntable);
+  // The hero's own skin: what an item that is only his form (an arcana's style) asks for.
+  const reskin = () => {
+    const k = Math.max(0, ...[...worn.values()].filter((w) => w.item && w.style.form && !w.style.models?.length).map((w) => w.style.skin || 0));
+    for (const o of heroMeshes) dressMesh(o, manifest.materials, texture, '', cube, manifest.skins?.hero?.[k - 1]);
+  };
 
   // Animations: the entry once, then the idle loop; the others on request.
   const mixer = new THREE.AnimationMixer(root), clips = new Map(heroModel.animations.map((a) => [a.name, a]));
@@ -236,12 +260,35 @@ async function buildHero(manifest, url, manager, time, light) {
   const idleName = clips.has(a.idle) ? a.idle : list[0]?.name;
   const idle = idleName ? action(idleName) : null; let current = idle, currentName = idleName;
   const loops = new Set(list.filter((x) => x.loop).map((x) => x.name)); if (idleName) loops.add(idleName);
-  const start = (name, fade = 0.25) => {
-    const next = action(name); if (!next) return 0;
-    const loop = loops.has(name); next.reset(); next.setLoop(loop ? THREE.LoopRepeat : THREE.LoopOnce, Infinity); next.clampWhenFinished = !loop; next.play();
-    if (current && current !== next) current.crossFadeTo(next, fade, false); current = next; currentName = name; return next.getClip().duration;
+  // What is worn picks among an animation's variants by their activity modifiers (Huskar's spear
+  // grip, Juggernaut's Faces set): the one matching the most, fewest others on a tie, as the game
+  // does; none matching, the plain one. modifiers: [activity or ALL, tag] of all that is worn.
+  const variants = (a.variants || []).filter((x) => clips.has(x.name)), activityOf = new Map([...list, ...variants].map((x) => [x.name, x.activity]));
+  let modifiers = [];
+  const pick = (name) => {
+    const act = activityOf.get(name); if (!act) return name;
+    const tags = new Set(modifiers.filter(([at]) => at === 'ALL' || at === act).map(([, tag]) => tag));
+    let best = name, score = 0, extra = Infinity;
+    for (const v of variants) {
+      if (v.activity !== act) continue; const m = v.modifiers.filter((tag) => tags.has(tag)).length, x = v.modifiers.length - m;
+      if (m > score || (m && m === score && x < extra)) { best = v.name; score = m; extra = x; }
+    }
+    return best;
   };
-  mixer.addEventListener('finished', (e) => { if (e.action === current && idle && current !== idle) start(idleName, 0.3); });
+  let currentBase = idleName;
+  // name: an animation of the list (or the entry); what plays is its variant.
+  const start = (name, fade = 0.25) => {
+    const clip = pick(name), next = action(clip); if (!next) return 0;
+    const loop = loops.has(name); next.reset(); next.setLoop(loop ? THREE.LoopRepeat : THREE.LoopOnce, Infinity); next.clampWhenFinished = !loop; next.play();
+    if (current && current !== next) current.crossFadeTo(next, fade, false); current = next; currentName = clip; currentBase = name; return next.getClip().duration;
+  };
+  mixer.addEventListener('finished', (e) => { if (e.action === current && idle && currentBase !== idleName) start(idleName, 0.3); });
+  // The modifiers of what each slot wears now; the animation playing changes to its variant.
+  const remodify = () => {
+    modifiers = [...(a.defaults?.hero || []), ...[...worn].flatMap(([slot, w]) => (w.item ? w.style.activities || [] : a.defaults?.[slot] || []))];
+    if (current?.isRunning() && pick(currentBase) !== currentName) start(currentBase, 0.2);
+  };
+  remodify();
   // Bounds in the idle pose (for framing, shadows and the drag area); then the entry, if any.
   if (idle) start(idleName, 0);
   mixer.update(0); turntable.updateMatrixWorld(true);
@@ -341,6 +388,8 @@ async function buildHero(manifest, url, manager, time, light) {
     for (const e of effects) e.sim.dispose();
     replaced.clear(); lib.aliases.clear();
     const list = (manifest.effects || []).filter((e) => !worn.get(e.owner)?.item);
+    // A slot's default replaces effects while it is worn (the hero's own default, always).
+    for (const [slot, r] of Object.entries(manifest.replace || {})) if (!worn.get(slot)?.item) for (const [from, to] of Object.entries(r)) replaced.set(from, to);
     for (const [slot, w] of worn) if (w.item) {
       for (const system of w.style.effects) list.push({ system, owner: slot });
       for (const [from, to] of Object.entries(w.style.particles)) replaced.set(from, to);
@@ -381,8 +430,10 @@ async function buildHero(manifest, url, manager, time, light) {
   return {
     turntable, lib, box, heroBox, live, get effects() { return effects; }, animations: list.map((x) => ({ ...x, loop: loops.has(x.name), duration: clips.get(x.name).duration })),
     play: (name) => start(name),
+    // The clip playing: the animation's variant for what is worn.
+    get playing() { return currentName; },
     update(dt, camera) {
-      mixer.update(dt);
+      mixer.update(dt); for (const w of worn.values()) w.companion?.mixer.update(dt);
       // A later event with the same model in the same animation takes over (Ringmaster's box: built, then broken).
       for (const p of props) p.at = currentName === p.sequence && current ? current.time - p.frame / 30 : -1;
       for (const p of props) { const later = props.some((q) => q !== p && q.file === p.file && q.sequence === p.sequence && q.frame > p.frame && q.at >= 0); p.scene.visible = p.at >= 0 && !later; if (p.scene.visible) p.mixer.setTime(p.at); }
@@ -418,9 +469,18 @@ async function buildHero(manifest, url, manager, time, light) {
           const scenes = await Promise.all(s.models.map((n) => loader.loadAsync(source.url(m.models[n]))));
           for (const [path, info] of Object.entries(m.fxModels || {})) { const file = source.url(info.file); propModels[file] ||= await loader.loadAsync(file); (manifest.fxModels ||= {})[path] ||= { file, clips: info.clips }; }
           lib.add({ systems: m.systems, snapshots: m.snapshots, textures: Object.fromEntries(Object.entries(m.textures || {}).map(([k, v]) => [k, { ...v, file: source.url(`fx/${v.file}`) }])) });
-          for (const sc of scenes) dress(sc.scene, m.materials, tex, source.url(''));
+          const itemCube = cubeOf(source.url, itemManager);
+          scenes.forEach((sc, i) => dress(sc.scene, m.materials, tex, source.url(''), itemCube, m.skins?.[s.models[i]]?.[(s.skin || 0) - 1]));
           await new Promise((done) => { if (!itemManager.itemsTotal || itemManager.itemsLoaded >= itemManager.itemsTotal) done(); else { itemManager.onLoad = done; itemManager.onError = () => {}; } });
-          record = { scenes, attachments: Object.assign({}, ...s.models.map((n) => m.attachments?.[n] || {})) };
+          let companion = null;
+          if (s.companion) {
+            const c = s.companion, gltf = await loader.loadAsync(source.url(m.models[c.model])), group = new THREE.Group(), mixer = new THREE.AnimationMixer(gltf.scene);
+            dress(gltf.scene, m.materials, tex, source.url(''), itemCube); group.add(gltf.scene);
+            group.position.set(...c.offset).applyMatrix4(SOURCE_TO_GLTF); group.scale.setScalar(c.scale || 1);
+            const clip = gltf.animations.find((x) => x.name === c.clip) || gltf.animations[0]; if (clip) mixer.clipAction(clip).play();
+            companion = { group, mixer };
+          }
+          record = { scenes, companion, attachments: Object.assign({}, ...s.models.map((n) => m.attachments?.[n] || {})) };
           wearing.set(key, record);
         }
       }
@@ -429,9 +489,9 @@ async function buildHero(manifest, url, manager, time, light) {
       const old = worn.get(slot); if (old) takeOff(old);
       if (record.scenes && !record.meshes) { record.meshes = []; record.extra = []; for (const sc of record.scenes) { const w = fit(sc.scene); record.meshes.push(...w.meshes); record.extra.push(...w.extra); } }
       putOn(record);
-      worn.set(slot, { meshes: record.meshes, extra: record.extra, item: m ? m.id : null, style: s, styleIndex: m ? m.styles.indexOf(s) : 0 });
+      worn.set(slot, { meshes: record.meshes, extra: record.extra, companion: record.companion, item: m ? m.id : null, style: s, styleIndex: m ? m.styles.indexOf(s) : 0 });
       attachments[slot] = m ? record.attachments : manifest.attachments?.[slot];
-      ambient();
+      ambient(); remodify(); reskin();
     },
     dispose() {
       mixer.stopAllAction(); for (const p of props) p.mixer.stopAllAction(); turntable.traverse((o) => { o.geometry?.dispose(); });

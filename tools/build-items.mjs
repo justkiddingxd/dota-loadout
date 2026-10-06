@@ -16,16 +16,23 @@ const game = resolve(opt('game', '.cache/game/dota')), out = resolve(opt('out', 
 const only = (opt('only', '') || '').split(',').filter(Boolean);
 if (!cli) throw new Error('--cli <Source2Viewer-CLI> is needed');
 const CACHE = resolve('.cache');
-const NOT_WORN = /taunt|summon|voice|persona|ability_effects|hero_base|effigy|costume|selector|ward|courier|loading_screen|announcer|music|hud|cursor|weather|terrain|emblem|multikill|streak|death_effects|hero_effigy/;
+const NOT_WORN = /taunt|voice|ability_effects|effigy|costume|ward|courier|loading_screen|announcer|music|hud|cursor|weather|terrain|emblem|multikill|streak|death_effects/;
 
 const { heroes } = loadGame(game), cosmetics = loadCosmetics(game);
 const list = heroes.filter((h) => !only.length || only.includes(h.id));
 for (const hero of list) {
   const heroDir = join(out, 'heroes', hero.id), c = cosmetics.get(hero.npc);
   if (!existsSync(join(heroDir, 'hero.json')) || !c) { console.log(`${hero.id}: no hero build or no items, skipped`); continue; }
-  const { json } = readGlb(join(heroDir, 'models/hero.glb'));
-  const heroBones = new Set((json.skins || []).flatMap((s) => s.joints.map((j) => json.nodes[j].name?.toLowerCase())));
+  const bonesOf = (dir) => { const { json } = readGlb(join(dir, 'models/hero.glb')); return new Set((json.skins || []).flatMap((s) => s.joints.map((j) => json.nodes[j].name?.toLowerCase()))); };
+  // A persona's slots dress the persona's skeleton.
+  const skeletons = new Map(), heroBones = (slot) => {
+    const n = /_persona_(\d+)$/.exec(slot)?.[1], dir = n && existsSync(join(heroDir, 'forms', `persona${n}`, 'models/hero.glb')) ? join(heroDir, 'forms', `persona${n}`) : heroDir;
+    if (!skeletons.has(dir)) skeletons.set(dir, bonesOf(dir)); return skeletons.get(dir);
+  };
   const items = c.items.filter((i) => i.slot && !NOT_WORN.test(i.slot) && !i.unsupported);
+  // Styles that change the hero's model name his form by its key (a form built with him, or none).
+  for (const i of items) for (const s of i.styles) if (s.form && typeof s.form === 'object') s.form = hero.forms?.find((f) => f.model === s.form.model)?.key || null;
+  for (const i of items) for (const s of i.styles) if (s.form && !existsSync(join(heroDir, 'forms', s.form, 'hero.json'))) s.form = null;
   console.log(`${hero.name.en}: ${items.length} items of ${c.items.length}`);
   const built = {}, started = Date.now(); let next = 0, done = 0;
   const worker = async () => {
@@ -33,7 +40,7 @@ for (const hero of list) {
       const item = items[next++], dir = join(out, 'items', String(item.id));
       if (flag('keep') && existsSync(join(dir, 'item.json'))) { built[item.id] = { worn: true }; done++; continue; }
       const log = [];
-      try { built[item.id] = await buildItem({ game, cli, item, heroBones, out: dir, temp: join(CACHE, 'temp', `item${item.id}`), log: (l) => log.push(l) }); }
+      try { built[item.id] = await buildItem({ game, cli, item, heroBones: heroBones(item.slot), out: dir, temp: join(CACHE, 'temp', `item${item.id}`), log: (l) => log.push(l) }); }
       catch (e) { built[item.id] = { error: e.message.split('\n')[0] }; }
       done++; const r = built[item.id]; if (!r.error && !r.worn) rmSync(dir, { recursive: true, force: true });
       console.log(`  [${done}/${items.length}] ${item.id} ${item.name.en}: ${r.error ? `ERROR ${r.error}` : `${r.models} models, ${r.systems} systems, ${r.icons} icons${r.worn ? '' : ', nothing worn'}`}`);
@@ -46,9 +53,9 @@ for (const hero of list) {
   const manifests = Object.fromEntries(ok.map((i) => [i.id, JSON.parse(readFileSync(join(out, 'items', String(i.id), 'item.json'), 'utf8'))]));
   const catalog = {
     version: 1,
-    slots: c.slots.filter((s) => ok.some((i) => i.slot === s.name)).map((s) => ({ name: s.name, text: s.text, items: ok.filter((i) => i.slot === s.name).sort((a, b) => b.default - a.default || b.id - a.id).map((i) => i.id) })),
+    slots: c.slots.filter((s) => ok.some((i) => i.slot === s.name)).map((s) => ({ name: s.name, text: s.text, ...(/_persona_(\d+)$/.test(s.name) ? { persona: +/_persona_(\d+)$/.exec(s.name)[1] } : {}), items: ok.filter((i) => i.slot === s.name).sort((a, b) => b.default - a.default || b.id - a.id).map((i) => i.id) })),
     items: Object.fromEntries(ok.map((i) => [i.id, { name: i.name, slot: i.slot, rarity: i.rarity, default: i.default || undefined, set: i.set || undefined,
-      styles: manifests[i.id].styles.map((s) => ({ name: s.name, icon: s.icon })) }])),
+      styles: manifests[i.id].styles.map((s) => ({ name: s.name, icon: s.icon, ...(s.form ? { form: s.form } : {}) })) }])),
     sets: c.sets.map((s) => ({ ...s, items: s.items.filter((id) => manifests[id]) })).filter((s) => s.items.length > 1),
   };
   mkdirSync(heroDir, { recursive: true });

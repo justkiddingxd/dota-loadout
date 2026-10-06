@@ -7,6 +7,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { compressHeroModels } from './compress.mjs';
+import { pickAnimations, sequences } from './game.mjs';
 import { buildBundle } from './hero.mjs';
 
 const exec = promisify(execFile);
@@ -20,9 +21,17 @@ export async function buildItem({ game, cli, item, heroBones, out, temp, log = (
 
   // Every model any style wears, once.
   const paths = [...new Set(item.styles.flatMap((s) => s.models))].filter(has), MODELS = Object.fromEntries(paths.map((p, i) => [`w${i}`, p]));
+  // Companions (pets, summoned units' looks) stand on their own: their skeleton, and the clip they
+  // idle in (loadout, else idle, else the first).
+  const companions = [...new Set(item.styles.map((s) => s.companion?.model).filter(Boolean))].filter(has), clipOf = {};
+  for (const [i, path] of companions.entries()) {
+    const { stdout } = await exec(cli, ['-i', join(game, `${path}_c`), '-a'], { encoding: 'utf8', maxBuffer: 1 << 30 });
+    const seqs = sequences(stdout).filter((s) => !s.name.startsWith('@') && s.name !== 'bindPose'), picked = pickAnimations(seqs);
+    MODELS[`prop${i}`] = path; clipOf[`prop${i}`] = picked.idle || seqs.find((s) => s.loop)?.name || seqs[0]?.name || null;
+  }
   const effects = [...new Set(item.styles.flatMap((s) => [...s.effects, ...Object.values(s.particles)]))];
   const snapshots = [...new Set(item.styles.flatMap((s) => Object.values(s.snapshots)))].filter(has);
-  const bundle = await buildBundle({ game, cli, out, temp, log, MODELS, kind: () => 'worn', effects, heroBones, extraSnapshots: snapshots });
+  const bundle = await buildBundle({ game, cli, out, temp, log, MODELS, kind: (name) => (/^prop/.test(name) ? 'prop' : 'worn'), animations: (name) => (clipOf[name] ? [clipOf[name]] : null), effects, heroBones, extraSnapshots: snapshots });
   const { modelFiles, fxFiles, fxModels, materials, systems, textures, attachments } = bundle;
   const nameOf = Object.fromEntries(Object.entries(MODELS).map(([name, path]) => [path, name]));
 
@@ -40,10 +49,11 @@ export async function buildItem({ game, cli, item, heroBones, out, temp, log = (
   }
 
   const manifest = {
-    version: 1, id: item.id, slot: item.slot, models: modelFiles, materials, systems, textures, snapshots: bundle.snapshots, attachments,
+    version: 1, id: item.id, slot: item.slot, models: modelFiles, materials, systems, textures, snapshots: bundle.snapshots, attachments, ...(Object.keys(bundle.skins).length ? { skins: bundle.skins } : {}),
     fxModels: Object.fromEntries(Object.entries(fxModels).filter(([, fx]) => fxFiles[fx.name]).map(([path, fx]) => [path, { file: fxFiles[fx.name], clips: fx.clips }])),
     styles: item.styles.map((s) => ({
-      name: s.name, icon: icons[s.icon] || null, skin: s.skin,
+      name: s.name, icon: icons[s.icon] || null, skin: s.skin, activities: s.activities || [], form: s.form || null,
+      companion: (() => { const n = s.companion && nameOf[s.companion.model]; return n && modelFiles[n] ? { model: n, clip: clipOf[n], offset: s.companion.offset, scale: s.companion.scale } : null; })(),
       models: s.models.map((p) => nameOf[p]).filter((n) => modelFiles[n]),
       effects: s.effects.filter((e) => systems[e]), particles: Object.fromEntries(Object.entries(s.particles).filter(([, to]) => systems[to])),
       snapshots: Object.fromEntries(Object.entries(s.snapshots).filter(([, to]) => bundle.snapshots[to])),
@@ -52,5 +62,5 @@ export async function buildItem({ game, cli, item, heroBones, out, temp, log = (
   writeFileSync(join(out, 'item.json'), JSON.stringify(manifest));
   await compressHeroModels(join(out, 'models'));
   rmSync(temp, { recursive: true, force: true });
-  return { models: Object.keys(modelFiles).length, systems: Object.keys(systems).length, icons: Object.keys(icons).length, worn: manifest.styles.some((s) => s.models.length || s.effects.length) };
+  return { models: Object.keys(modelFiles).length, systems: Object.keys(systems).length, icons: Object.keys(icons).length, worn: manifest.styles.some((s) => s.models.length || s.effects.length || s.activities.length || s.form || s.companion) };
 }

@@ -40,7 +40,11 @@ for (const f of readdirSync(MANIFESTS).filter((f) => /^manifest_\d+_\d+\.txt$/.t
 }
 const download = async (files) => {
   const byDepot = new Map(); for (const f of files) { const d = depotOf.get(f); if (!d) throw new Error(`No depot has ${f}`); (byDepot.get(d) || byDepot.set(d, []).get(d)).push(f); }
-  for (const [d, list] of byDepot) { const fl = join(STEAM, `filelist_${d}.txt`); writeFileSync(fl, list.join('\n') + '\n'); await depot(['-depot', d, '-filelist', fl, '-dir', DL]); }
+  for (const [d, list] of byDepot) {
+    const fl = join(STEAM, `filelist_${d}.txt`); writeFileSync(fl, list.join('\n') + '\n');
+    // Steam drops the connection now and then: three tries.
+    for (let i = 1; ; i++) { try { await depot(['-depot', d, '-filelist', fl, '-dir', DL]); break; } catch (e) { if (i === 3 || /password/.test(e.message)) throw e; log(`depot ${d}: ${e.message.split('\n').find((l) => /Lost|cancel|error/i.test(l)) || 'failed'}, again`); } }
+  }
 };
 
 const loose = ['game/dota/pak01_dir.vpk', 'game/dota/gameinfo.gi', 'game/dota/steam.inf'];

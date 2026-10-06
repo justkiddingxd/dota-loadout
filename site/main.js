@@ -100,7 +100,7 @@ function renderHero(h) {
   $('[data-name]').textContent = nameOf(h);
   $('[data-complexity]').replaceChildren(...[1, 2, 3].map((i) => el('i', { className: i <= h.complexity ? 'on' : '' })));
   $('[data-hype]').innerHTML = safe(h.hype?.[lang] || h.hype?.en);
-  $('[data-anims]').replaceChildren(...h.animations.map((a) => {
+  $('[data-anims]').replaceChildren(...animsOf(h).map((a) => {
     const [text, sub] = label(h, a), b = el('button', { type: 'button' }, text, sub ? el('small', { textContent: sub }) : null, el('i'));
     b.dataset.name = a.name; b.setAttribute('aria-pressed', state.active === a.name); b.onclick = () => play(a.name); return el('li', {}, b);
   }));
@@ -130,7 +130,7 @@ function mark(name) {
 // A looping animation stays; the others run their progress line and hand back to the idle.
 function play(name) {
   const h = state.current; if (!h) return;
-  const a = h.animations.find((x) => x.name === name), duration = viewer.play(name); mark(name);
+  const a = animsOf(h).find((x) => x.name === name), duration = viewer.play(name); mark(name);
   cancelAnimationFrame(state.playing);
   if (!a || a.loop || !duration) return;
   const bar = document.querySelector(`[data-anims] button[data-name="${CSS.escape(name)}"] i`), start = performance.now();
@@ -141,7 +141,9 @@ function play(name) {
   };
   tick();
 }
-const idleOf = (h) => (h.animations.find((a) => a.activity === 'ACT_DOTA_LOADOUT') || h.animations.find((a) => a.loop) || h.animations[0])?.name;
+// The animations of the form loaded (a persona's are its own), else the roster's.
+const animsOf = (h) => (state.current === h && state.animations) || h.animations;
+const idleOf = (h) => { const list = animsOf(h); return (list.find((a) => a.activity === 'ACT_DOTA_LOADOUT') || list.find((a) => a.loop) || list[0])?.name; };
 
 let loads = 0;
 async function open(id) {
@@ -149,23 +151,38 @@ async function open(id) {
   if (!h || state.current?.id === h.id) return;
   const ticket = ++loads;
   state.current = h; state.active = null; cancelAnimationFrame(state.playing);
-  state.catalog = null; state.worn = {}; closeDrawer(); renderRail();
-  const catalog = fetch(`heroes/${h.id}/items.json`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+  state.catalog = null; state.worn = {}; state.form = null; state.animations = null; closeDrawer(); renderRail();
   renderHero(h); ghost(nameOf(h).toUpperCase());
-  const status = $('[data-status]'); status.hidden = false; status.classList.remove('error'); $('[data-bar]').style.width = '0';
-  $('[data-status-text]').textContent = `${t().loading} · ${(h.size / 1048576).toFixed(1)} MB`;
+  showLoading(h);
   try {
-    const loaded = await viewer.load(`heroes/${h.id}/`);
-    if (ticket !== loads || !loaded) return;
-    status.hidden = true;
-    const manifestIdle = idleOf(h);
-    mark(manifestIdle);
-    state.catalog = await catalog; if (ticket !== loads) return;
-    renderRail(); dress(parseHash().worn);
+    // The catalog first: what the address has him wear may be another form of him (a persona, an arcana).
+    state.catalog = await fetch(`heroes/${h.id}/items.json`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+    if (ticket !== loads) return;
+    state.worn = valid(parseHash().worn);
+    await reload(ticket);
   } catch (e) {
     if (ticket !== loads) return;
-    status.classList.add('error'); $('[data-status-text]').textContent = t().failed; console.error(e);
+    $('[data-status]').classList.add('error'); $('[data-status-text]').textContent = t().failed; console.error(e);
   }
+}
+function showLoading(h) {
+  const status = $('[data-status]'); status.hidden = false; status.classList.remove('error'); $('[data-bar]').style.width = '0';
+  $('[data-status-text]').textContent = `${t().loading} · ${(h.size / 1048576).toFixed(1)} MB`;
+}
+// Loads the hero in the form what he wears asks for, then puts on what applies to it.
+async function reload(ticket = ++loads) {
+  const h = state.current; state.form = formOf(state.worn);
+  showLoading(h);
+  let loaded;
+  try { loaded = await viewer.load(`heroes/${h.id}/${state.form ? `forms/${state.form}/` : ''}`); } catch (e) {
+    if (ticket === loads) { $('[data-status]').classList.add('error'); $('[data-status-text]').textContent = t().failed; console.error(e); }
+    return;
+  }
+  if (ticket !== loads || !loaded) return;
+  $('[data-status]').hidden = true;
+  state.animations = loaded.animations; renderHero(h); mark(idleOf(h));
+  writeHash(); renderRail(); if (state.drawer) renderDrawer();
+  await Promise.all(Object.entries(state.worn).filter(([slot, w]) => w && applies(slot)).map(([slot, [id, style]]) => viewer.wear(slot, `items/${id}/`, style).catch((e) => console.error(e))));
 }
 
 // ---------------------------------------------------------------- wardrobe
@@ -181,29 +198,51 @@ function writeHash() {
 }
 const RARITY = { common: '#b0c3d9', uncommon: '#5e98d9', rare: '#4b69ff', mythical: '#8847ff', legendary: '#d32ce6', immortal: '#e4ae39', arcana: '#ade55c', ancient: '#eb4b4b', seasonal: '#fff34f' };
 const itemName = (it) => it.name[lang] || it.name.en;
-const iconOf = (id, style = 0) => { const it = state.catalog?.items[id], s = it?.styles[style] || it?.styles[0]; return s?.icon ? `items/${id}/${s.icon}` : null; };
+// A style without an icon of its own shows the item's.
+const iconOf = (id, style = 0) => { const it = state.catalog?.items[id], icon = it?.styles[style]?.icon || it?.styles.find((s) => s.icon)?.icon; return icon ? `items/${id}/${icon}` : null; };
 const defaultOf = (slot) => state.catalog.slots.find((s) => s.name === slot)?.items.find((id) => state.catalog.items[id].default) ?? null;
 const shownIn = (slot) => state.worn[slot]?.[0] ?? defaultOf(slot);
+
+// Forms: a worn style may put the hero in another model of his (a persona's number, an arcana's).
+// A persona has slots of its own; the hero's others wait, kept, until he leaves it.
+const formsOf = (worn) => Object.entries(worn).filter(([, w]) => w).map(([slot, [id, style]]) => { const it = state.catalog?.items[id]; return { slot, form: (it?.styles[style] || it?.styles[0])?.form }; }).filter((x) => x.form);
+const slotPersona = (slot) => +(/_persona_(\d+)$/.exec(slot)?.[1] || 0);
+// The persona worn (its number, 0 for none): his slots or its own apply.
+const personaOf = (worn) => +(/^persona(\d+)$/.exec(formsOf(worn).find((x) => x.form.startsWith('persona'))?.form || '')?.[1] || 0);
+// The form to load: a persona's own item may change its model again (Anti-Mage's Kirin); out of a
+// persona, an item of his own slots that changes his.
+const formOf = (worn) => {
+  const forms = formsOf(worn), p = personaOf(worn);
+  return forms.find((x) => p && slotPersona(x.slot) === p)?.form || (p ? `persona${p}` : forms.find((x) => !slotPersona(x.slot))?.form) || null;
+};
+const applies = (slot) => { const s = state.catalog?.slots.find((x) => x.name === slot), p = personaOf(state.worn); return !!s && (s.persona ? s.persona === p : !p || slot === 'persona_selector'); };
+// What the address names that the catalog has (defaults are the hero's own: nothing to keep).
+const valid = (worn) => Object.fromEntries(Object.entries(worn).filter(([slot, [id]]) => { const it = state.catalog?.items[id]; return it && !it.default && it.slot === slot; }));
 
 // Puts an item on (null or a default: the hero's own) and remembers it in the address.
 async function wear(slot, id, style = 0) {
   const it = id && state.catalog?.items[id];
   state.worn[slot] = it && !it.default ? [+id, style] : null;
+  if (formOf(state.worn) !== state.form) return reload();
   writeHash(); renderRail(); if (state.drawer) renderDrawer();
   await viewer.wear(slot, state.worn[slot] ? `items/${id}/` : null, style).catch((e) => console.error(e));
 }
 // What the address asks for, on the slots it names; the others go back to their defaults.
 function dress(worn) {
   if (!state.catalog) return;
+  const next = valid(worn);
+  if (formOf(next) !== state.form) { state.worn = next; reload(); return; }
   for (const s of state.catalog.slots) {
-    const want = worn[s.name] && state.catalog.items[worn[s.name][0]] ? worn[s.name] : null, now = state.worn[s.name] || null;
-    if (JSON.stringify(want) !== JSON.stringify(now)) wear(s.name, want?.[0] ?? null, want?.[1] ?? 0);
+    const want = next[s.name] || null, now = state.worn[s.name] || null;
+    if (JSON.stringify(want) === JSON.stringify(now)) continue;
+    if (applies(s.name)) wear(s.name, want?.[0] ?? null, want?.[1] ?? 0); else state.worn[s.name] = want;
   }
+  writeHash();
 }
 function renderRail() {
   const rail = $('[data-rail]'), c = state.catalog;
   rail.hidden = !c?.slots.length; if (!c) return rail.replaceChildren();
-  const buttons = c.slots.map((s) => {
+  const buttons = c.slots.filter((s) => applies(s.name)).map((s) => {
     const id = shownIn(s.name), icon = id && iconOf(id, state.worn[s.name]?.[1]), b = el('button', { type: 'button', title: s.text[lang] || s.text.en }, el('span', { textContent: s.text[lang] || s.text.en }));
     if (icon) b.style.backgroundImage = `url("${icon}")`;
     b.classList.toggle('changed', !!state.worn[s.name]); b.setAttribute('aria-expanded', state.drawer === s.name);
@@ -225,10 +264,10 @@ function renderDrawer() {
   if (which === '#sets') {
     $('[data-drawer-title]').textContent = t().sets; styles.hidden = true;
     const sets = c.sets.filter((s) => !q || (s.name?.[lang] || s.name?.en || s.key).toLowerCase().includes(q));
-    const reset = el('button', { type: 'button', className: 'set' }, el('b', { textContent: t().allDefault })); reset.onclick = () => { for (const s of c.slots) if (state.worn[s.name]) wear(s.name, null); };
+    const reset = el('button', { type: 'button', className: 'set' }, el('b', { textContent: t().allDefault })); reset.onclick = () => { state.worn = {}; reload(); };
     body.replaceChildren(reset, ...sets.map((s) => {
       const b = el('button', { type: 'button', className: 'set' }, el('b', { textContent: s.name?.[lang] || s.name?.en || s.key }), el('span', { className: 'icons' }, ...s.items.map((id) => el('img', { src: iconOf(id) || '', alt: '', loading: 'lazy' }))));
-      b.onclick = () => { for (const id of s.items) wear(c.items[id].slot, id); }; return b;
+      b.onclick = () => { const worn = { ...state.worn }; for (const id of s.items) worn[c.items[id].slot] = [id, 0]; dress(worn); }; return b;
     }));
     return;
   }

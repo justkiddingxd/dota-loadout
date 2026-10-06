@@ -4,11 +4,15 @@
 // G metalness, B tint by base colour; the normal's blue carries the specular exponent mask (its z
 // is rebuilt); the fresnel warp gives rim (R) and specular (B) strength by the angle to the eye.
 //   albedo      = colour + detail × detail mask × blend (the scrolling fire of F_DETAIL 2)
-//   diffuse     = half-Lambert key light × shadow + directional ambient + shadow colour in shadow
+//   diffuse     = half-Lambert key light (or the diffuse warp's ramp of it, where its mask says) × shadow
+//                 + directional ambient + shadow colour in shadow
 //   specular    = N·L × (L·R)^(exponent mask × exponent) × light × scale × specular mask
 //                 × mix(colour, specular colour, tint mask) × max(fresnel B, metalness)
 //   lit         = mix(albedo × diffuse + specular, specular, metalness)
 //                 + rim mask × rim colour × ambient colour × rim scale × max(N·up, 0) × fresnel R
+//               + cube map (F_SPECULAR_CUBE_MAP) of the reflection × scale × specular mask (or metalness),
+//                 off a non-metal only at grazing angles (fresnel B), as Viper's wings and Marci's cloth look
+//                 × mix(1, colour, max(tint mask, metalness)) — a metal reflects in its own colour
 //   out         = mix(lit, albedo, self-illumination + detail alpha × detail mask × blend)
 import * as THREE from 'three';
 
@@ -16,9 +20,12 @@ const BLACK = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1); BLACK
 const GREY = new THREE.DataTexture(new Uint8Array([128, 128, 255, 255]), 1, 1); GREY.needsUpdate = true;
 const srgb = (c) => new THREE.Color().setRGB(...c, THREE.SRGBColorSpace);
 
-// m: a material of hero.json; texture(file, srgb) loads one of its textures; time and light are
-// uniforms shared by every material of the scene.
-export function heroMaterial(m, texture, time, light) {
+// The game's axes from the scene's (glTF), for looking up the cube maps, which are in the game's.
+const TO_SOURCE = new THREE.Matrix3().setFromMatrix4(new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(-Math.PI / 2, 0, -Math.PI / 2, 'YXZ')).invert());
+
+// m: a material of hero.json; texture(file, srgb) loads one of its textures, cube(file) a cube map
+// from its strip of faces; time and light are uniforms shared by every material of the scene.
+export function heroMaterial(m, texture, time, light, cube = null) {
   const material = new THREE.MeshPhongMaterial({
     map: m.color ? texture(m.color, true) : null, normalMap: m.normal ? texture(m.normal) : null,
     alphaTest: m.alphaTest || 0, transparent: !!(m.translucent || m.additive), depthWrite: !(m.translucent || m.additive), side: THREE.DoubleSide,
@@ -32,13 +39,18 @@ export function heroMaterial(m, texture, time, light) {
     uDetailBlend: { value: m.detailMode ? m.detailBlend ?? 1 : 0 },
     uRimColor: { value: srgb(m.rimColor?.length === 3 ? m.rimColor : [1, 1, 1]).multiplyScalar(m.rimScale ?? 0) }, uSpecColor: { value: srgb(m.specColor?.length === 3 ? m.specColor : [1, 1, 1]) },
     uSpecExponent: { value: m.specExponent ?? 16 }, uSpecScale: { value: m.specScale ?? 1 },
+    tDiffuseWarp: { value: m.diffuseWarp ? texture(m.diffuseWarp) : BLACK }, uDiffuseWarp: { value: m.diffuseWarp ? 1 : 0 },
+    tCube: { value: m.cube && cube ? cube(m.cube) : null }, uCubeScale: { value: m.cubeScale ?? 0 }, uToSource: { value: TO_SOURCE },
   };
+  const useCube = !!(m.cube && cube);
+  material.userData.hero = uniforms;
   material.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, uniforms);
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', `#include <common>
 #define USE_PACKED_NORMALMAP
-uniform sampler2D tMasks, tSpec, tDetail, tFresnel; uniform float uTime, uDetailBlend, uSpecExponent, uSpecScale; uniform vec2 uDetailScale, uDetailScroll;
+uniform sampler2D tMasks, tSpec, tDetail, tFresnel, tDiffuseWarp; uniform float uTime, uDetailBlend, uSpecExponent, uSpecScale, uDiffuseWarp, uCubeScale; uniform vec2 uDetailScale, uDetailScroll;
+uniform mat3 uToSource;${useCube ? '\nuniform samplerCube tCube;' : ''}
 uniform vec3 uRimColor, uSpecColor, uLightDir, uLightColor, uAmbientDir, uAmbientColor, uAmbientTint, uShadowColor, uUp;`)
       .replace('#include <opaque_fragment>', `${m.color ? '' : 'vec2 vMapUv = vec2(0.0);'}
 vec4 heroMasks = texture2D(tMasks, vMapUv), heroSpec = texture2D(tSpec, vMapUv), heroDetailTex = texture2D(tDetail, vMapUv * uDetailScale + fract(uDetailScroll * uTime));
@@ -50,9 +62,12 @@ float heroShadow = 1.0;
 #if NUM_DIR_LIGHT_SHADOWS > 0
 heroShadow = getShadow(directionalShadowMap[0], directionalLightShadows[0].shadowMapSize, directionalLightShadows[0].shadowIntensity, directionalLightShadows[0].shadowBias, directionalLightShadows[0].shadowRadius, vDirectionalShadowCoord[0]);
 #endif
-vec3 heroDiffuse = (heroNL * 0.5 + 0.5) * heroShadow * uLightColor + clamp(dot(uAmbientDir, normal), 0.0, 1.0) * uAmbientColor + (1.0 - heroShadow) * uShadowColor;
+float heroHalf = heroNL * 0.5 + 0.5;
+vec3 heroRamp = mix(vec3(heroHalf), texture2D(tDiffuseWarp, vec2(heroHalf, 0.5)).rgb, uDiffuseWarp * heroMasks.a);
+vec3 heroDiffuse = heroRamp * heroShadow * uLightColor + clamp(dot(uAmbientDir, normal), 0.0, 1.0) * uAmbientColor + (1.0 - heroShadow) * uShadowColor;
 vec3 heroSpecular = clamp(heroNL, 0.0, 1.0) * pow(max(dot(uLightDir, heroR), 0.001), heroExponent) * uLightColor * uSpecScale * heroSpec.r * mix(heroBase, uSpecColor, heroSpec.b) * max(heroWarp.b, heroSpec.g);
 vec3 heroLit = mix(heroAlbedo * heroDiffuse + heroSpecular, heroSpecular, heroSpec.g) + heroMasks.b * uRimColor * uAmbientTint * max(dot(normal, uUp), 0.0) * heroWarp.r;
+${useCube ? `heroLit += textureCube(tCube, uToSource * inverseTransformDirection(heroR, viewMatrix)).rgb * uCubeScale * ${m.cubeByMetalness ? 'heroSpec.g' : 'heroSpec.r * mix(heroWarp.b, 1.0, heroSpec.g)'} * mix(vec3(1.0), heroBase, max(heroSpec.b, heroSpec.g));` : ''}
 outgoingLight = mix(heroLit, heroAlbedo, clamp(heroDetailTex.a * heroDetail + heroMasks.g, 0.0, 1.0));
 #include <opaque_fragment>`);
   };

@@ -1,5 +1,6 @@
 // Valve's KeyValues text (scripts/npc, items_game.txt, portraits, localization) to plain objects.
-// Keys keep their case; a repeated key keeps the first value, except blocks, which merge.
+// Keys keep their case; a repeated key keeps the first value, except blocks, which merge — but an
+// item's asset modifiers, many under the same name, each keep their own (asset_modifier#2, …).
 // Conditionals ([$WIN32]) are dropped with the value they guard; #base lines are returned apart.
 const TOKEN = /\s+|\/\/[^\n]*|"((?:[^"\\]|\\.)*)"|([{}])|(\[[^\]\n]*\])|(#base|#include)|([^\s{}"]+)/y;
 
@@ -16,7 +17,8 @@ export function parseKV(text) {
     const value = m[1] !== undefined ? m[1].replace(/\\(["\\nt])/g, (_, c) => ({ n: '\n', t: '\t' })[c] ?? c) : m[5];
     const top = stack[stack.length - 1];
     if (m[2] === '{') {
-      const k = key ?? ''; key = null;
+      let k = key ?? ''; key = null;
+      if (/^asset_modifier\d*$/.test(k) && k in top) { let n = 2; while (`${k}#${n}` in top) n++; k = `${k}#${n}`; }
       const block = top[k] && typeof top[k] === 'object' ? top[k] : (top[k] = {});
       stack.push(block);
     } else if (m[2] === '}') { if (stack.length > 1) stack.pop(); key = null; }

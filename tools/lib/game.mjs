@@ -26,10 +26,12 @@ export function loadGame(game) {
   const loc = { en: localization(game, 'english'), ru: localization(game, 'russian') };
   const text = (key, lang) => { if (!key) return null; const k = key.replace(/^#/, '').toLowerCase(); return loc[lang][k] ?? null; };
 
-  // Default items by hero.
-  const defaults = {};
+  // Default items by hero; the activity modifiers any item of a hero gives (its animations' variants).
+  const defaults = {}, tags = {};
   for (const [id, item] of Object.entries(items)) {
-    if (item.prefab !== 'default_item' || !item.used_by_heroes) continue;
+    if (!item.used_by_heroes || typeof item.used_by_heroes !== 'object') continue;
+    for (const npc of Object.keys(item.used_by_heroes)) for (const [activity, tag] of activityModifiers(item)) (tags[npc] ||= new Set()).add(tag);
+    if (item.prefab !== 'default_item') continue;
     for (const npc of Object.keys(item.used_by_heroes)) (defaults[npc] ||= []).push({ id: +id, ...item });
   }
 
@@ -40,17 +42,47 @@ export function loadGame(game) {
     if (!h?.Model) continue;
     const id = npc.replace(/^npc_dota_hero_/, '');
     const abilities = Object.entries(h).filter(([k, v]) => /^Ability\d+$/.test(k) && v && !/^(generic_hidden|special_bonus)/.test(v)).map(([, v]) => v);
-    const wearables = [], effects = [];
-    // A persona's default items dress another model of the hero: they are not the hero's look.
-    for (const item of (defaults[npc] || []).sort((a, b) => a.id - b.id).filter((i) => !/persona/.test(i.item_slot || ''))) {
-      // An item without a slot of its own has its prefab's (a default item's: the weapon).
-      const slot = item.item_slot || itemsGame.prefabs?.[item.prefab]?.item_slot, owner = item.model_player ? slot || `item${item.id}` : 'hero';
-      for (const [k, m] of Object.entries(item.visuals || {})) {
-        if (!/^asset_modifier/.test(k) || typeof m !== 'object') continue;
-        if ((m.type === 'particle_create' || m.type === 'particle') && /\.vpcf$/.test(m.modifier || '')) effects.push({ system: m.modifier.replace(/\.vpcf$/, ''), owner });
+    // The look of a set of default items: what they wear by slot, their effects and modifiers.
+    const dress = (list) => {
+      const wearables = [], effects = [], activities = {}, replace = {};
+      for (const item of list.sort((a, b) => a.id - b.id)) {
+        // An item without a slot of its own has its prefab's (a default item's: the weapon).
+        const slot = item.item_slot || itemsGame.prefabs?.[item.prefab]?.item_slot, owner = item.model_player ? slot || `item${item.id}` : 'hero';
+        for (const [k, m] of Object.entries(item.visuals || {})) {
+          if (!/^asset_modifier/.test(k) || typeof m !== 'object' || (m.style !== undefined && m.style !== '0')) continue;
+          // particle_create adds an effect; particle puts one in place of another (an ability's).
+          if (m.type === 'particle_create' && /\.vpcf$/.test(m.modifier || '')) effects.push({ system: m.modifier.replace(/\.vpcf$/, ''), owner });
+          if (m.type === 'particle' && /\.vpcf$/.test(m.asset || '') && /\.vpcf$/.test(m.modifier || '')) (replace[slot || 'hero'] ||= {})[m.asset.replace(/\.vpcf$/, '')] = m.modifier.replace(/\.vpcf$/, '');
+        }
+        const own = activityModifiers(item, '0'); if (own.length && !activities[slot || 'hero']) activities[slot || 'hero'] = own;
+        if (!item.model_player || wearables.some((w) => w.slot === owner)) continue;
+        wearables.push({ slot: owner, model: item.model_player, name: { en: text(item.item_name, 'en'), ru: text(item.item_name, 'ru') } });
       }
-      if (!item.model_player || wearables.some((w) => w.slot === owner)) continue;
-      wearables.push({ slot: owner, model: item.model_player, name: { en: text(item.item_name, 'en'), ru: text(item.item_name, 'ru') } });
+      return { wearables, effects, activities, replace };
+    };
+    // A persona's default items dress another model of the hero, and those of his abilities, summons,
+    // taunts and transformations (Terrorblade's Demon Form) only show while they act: not his look.
+    const LOOK = (slot) => !/persona|^ability|ultimate|summon|taunt|voice|shapeshift|hero_base/.test(slot || '');
+    const mine = defaults[npc] || [], { wearables, effects, activities, replace } = dress(mine.filter((i) => LOOK(i.item_slot)));
+    // Forms: the hero's model in place of his own — a persona's, with the persona's default items, or
+    // an item's (Juggernaut's Bladeform Legacy, Earthshaker's Planetfall), with his. Keyed by the item
+    // (and the persona's number); the item's own effects and modifiers stay with the item.
+    const forms = [];
+    for (const [itemId, item] of Object.entries(items)) {
+      if (!item.used_by_heroes?.[npc] || item.prefab === 'default_item') continue;
+      const modifiers = Object.entries(item.visuals || {}).filter(([k, m]) => /^asset_modifier/.test(k) && m && typeof m === 'object').map(([, m]) => m);
+      // A persona's selector, or an item of a persona's slot that changes the persona's model (Anti-Mage's Kirin).
+      const persona = modifiers.find((m) => m.type === 'persona')?.persona, ofPersona = /_persona_(\d+)$/.exec(item.item_slot || '')?.[1];
+      for (const m of modifiers) {
+        if (m.type !== 'entity_model' || m.asset !== npc || !/\.vmdl$/.test(m.modifier || '')) continue;
+        if (persona) {
+          const own = dress(mine.filter((i) => new RegExp(`_persona_${persona}$`).test(i.item_slot || '')));
+          if (!forms.some((f) => f.key === `persona${persona}`)) forms.push({ key: `persona${persona}`, item: +itemId, persona: +persona, model: m.modifier, ...own });
+        } else if (!forms.some((f) => f.model === m.modifier)) {
+          const own = ofPersona ? { ...dress(mine.filter((i) => new RegExp(`_persona_${ofPersona}$`).test(i.item_slot || ''))), persona: +ofPersona } : { wearables, effects, activities };
+          forms.push({ key: `${itemId}${m.style !== undefined ? `.${m.style}` : ''}`, item: +itemId, style: m.style === undefined ? null : +m.style, model: m.modifier, replace, ...own });
+        }
+      }
     }
     const p = portraits[npc] || {}, cam = p.cameras?.default || {};
     const nums = (v) => (v || '').trim().split(/\s+/).filter(Boolean).map(Number);
@@ -66,10 +98,16 @@ export function loadGame(game) {
       roles: (h.Role || '').split(',').filter(Boolean), complexity: +(h.Complexity ?? 0), name,
       hype: { en: text(`${npc}_hype`, 'en'), ru: text(`${npc}_hype`, 'ru') },
       abilities: abilities.map((a) => ({ id: a, name: { en: text(`DOTA_Tooltip_ability_${a}`, 'en'), ru: text(`DOTA_Tooltip_ability_${a}`, 'ru') } })),
-      wearables, effects, lighting, pedestal: p.PortraitBackgroundModel || null,
+      wearables, effects, replace, lighting, pedestal: p.PortraitBackgroundModel || null, activityTags: [...(tags[npc] || [])], activities, forms,
     });
   }
   return { heroes };
+}
+
+// An item's activity modifiers ([activity or ALL, tag]), of one style or of all.
+export function activityModifiers(item, style = null) {
+  return Object.entries(item.visuals || {}).filter(([k, m]) => /^asset_modifier/.test(k) && m?.type === 'activity' && m.modifier && (style === null || m.style === undefined || m.style === style))
+    .map(([, m]) => [m.asset || 'ALL', m.modifier]);
 }
 
 // The sequences of a model (Source2Viewer-CLI -a dump): name, looping, activity and modifiers.
@@ -98,7 +136,7 @@ const SKIP = { test: (a) => !KEEP.test(a) };
 const ORDER = ['ACT_DOTA_LOADOUT', 'ACT_DOTA_IDLE', 'ACT_DOTA_IDLE_RARE', 'ACT_DOTA_RUN', 'ACT_DOTA_ATTACK', 'ACT_DOTA_ATTACK2'];
 const TAIL = ['ACT_DOTA_SPAWN', 'ACT_DOTA_TELEPORT', 'ACT_DOTA_DISABLED', 'ACT_DOTA_VICTORY', 'ACT_DOTA_TAUNT', 'ACT_DOTA_DIE'];
 const debut = (s) => +(s.modifiers.includes('debut') || /debut/.test(s.name));
-export function pickAnimations(seqs, max = 24) {
+export function pickAnimations(seqs, max = 24, tags = []) {
   const best = new Map();
   for (const s of seqs) {
     if (!s.activity || s.name.startsWith('@') || SKIP.test(s.activity)) continue;
@@ -112,7 +150,17 @@ export function pickAnimations(seqs, max = 24) {
   const spawn = seqs.filter((s) => s.activity === 'ACT_DOTA_SPAWN' && (s.modifiers.includes('loadout') || /loadout/.test(s.name)))
     .sort((a, b) => debut(a) - debut(b) || a.modifiers.length - b.modifiers.length || a.name.length - b.name.length)[0];
   const idle = best.get('ACT_DOTA_LOADOUT') || best.get('ACT_DOTA_IDLE') || list[0];
-  return { idle: idle?.name || null, entry: spawn?.name || null, list: list.map(({ name, activity, loop }) => ({ name, activity, loop })) };
+  // Variants items ask for: the shown activities' sequences with the items' modifiers (Huskar's spear).
+  const shown = new Set(list.map((s) => s.activity)), wanted = new Set(tags), picked = new Set(list.map((s) => s.name));
+  // Only the items' own (and loadout): game states (injured, aggressive) are not shown; one sequence
+  // for each set of modifiers, the game's random alternatives left out.
+  wanted.add('loadout');
+  const seen = new Set(), variants = seqs.filter((s) => shown.has(s.activity) && !s.name.startsWith('@') && !picked.has(s.name) && !debut(s)
+      && s.modifiers.some((m) => m !== 'loadout' && wanted.has(m)) && s.modifiers.every((m) => wanted.has(m)))
+    .sort((a, b) => a.name.length - b.name.length)
+    .filter((s) => { const k = `${s.activity}|${[...s.modifiers].sort().join('+')}`; if (seen.has(k)) return false; seen.add(k); return true; })
+    .map(({ name, activity, loop, modifiers }) => ({ name, activity, loop, modifiers }));
+  return { idle: idle?.name || null, entry: spawn?.name || null, list: list.map(({ name, activity, loop, modifiers }) => ({ name, activity, loop, ...(modifiers.length ? { modifiers } : {}) })), variants };
 }
 
 // What a shown animation is made of: a sequence (ASEQ) plays local animations by index into
@@ -184,11 +232,15 @@ export function particleEvents(dump, names) {
 // summons) is left out; what it would change and is not done yet (personas, arcanas, animations) is
 // named in `unsupported`.
 export function loadCosmetics(game) {
+  // The hero an item is for, short (a pet's loadout places are by it).
+  const heroOf = (item) => Object.keys(item.used_by_heroes || {})[0]?.replace(/^npc_dota_hero_/, '');
   const ig = parseKV(read(game, 'scripts/items/items_game.txt')).data.items_game;
   const loc = { en: localization(game, 'english'), ru: localization(game, 'russian') };
   const text = (key) => { if (!key) return null; const k = key.replace(/^#/, '').toLowerCase(); const en = loc.en[k] ?? null; return en || loc.ru[k] ? { en, ru: loc.ru[k] ?? en } : null; };
   const DRAWN = new Set(['particle_create', 'particle', 'particle_snapshot', 'additional_wearable', 'model_skin']);
-  const UNSUPPORTED = new Set(['hero_model_change', 'persona', 'activity', 'arcana_level', 'bodygroup_visibility', 'entity_scale', 'particle_combined', 'model']);
+  // Ability forms (Dragon Knight's dragon, Undying's golem) are not the hero's look; what else is not
+  // done yet (other items' models swapped, bodygroups hidden) leaves the item in, as it mostly looks.
+  const UNSUPPORTED = new Set(['hero_model_change']);
   const byName = new Map(Object.entries(ig.items).map(([id, i]) => [i.name, +id]));
   const setOf = new Map();
   for (const [key, set] of Object.entries(ig.item_sets || {})) for (const name of Object.keys(set.items || {})) if (byName.has(name)) setOf.set(byName.get(name), key);
@@ -196,7 +248,7 @@ export function loadCosmetics(game) {
   for (const [id, item] of Object.entries(ig.items)) {
     if (!(item.prefab === 'default_item' || item.prefab === 'wearable') || !item.used_by_heroes || typeof item.used_by_heroes !== 'object') continue;
     const visuals = item.visuals || {}, modifiers = Object.entries(visuals).filter(([k, m]) => /^asset_modifier/.test(k) && m && typeof m === 'object').map(([, m]) => m);
-    const styleKeys = visuals.styles ? Object.keys(visuals.styles).sort((a, b) => a - b) : [null];
+    const styleKeys = visuals.styles ? Object.keys(visuals.styles).sort((a, b) => a - b) : [null], persona = modifiers.find((m) => m.type === 'persona')?.persona;
     const styles = styleKeys.map((s) => {
       const style = s === null ? {} : visuals.styles[s], mine = modifiers.filter((m) => m.style === undefined || m.style === s);
       const model = style.model_player || item.model_player;
@@ -208,6 +260,19 @@ export function loadCosmetics(game) {
         effects: mine.filter((m) => m.type === 'particle_create' && /\.vpcf$/.test(m.modifier || '')).map((m) => m.modifier.replace(/\.vpcf$/, '')),
         particles: pairs('particle'), snapshots: Object.fromEntries(mine.filter((m) => m.type === 'particle_snapshot' && m.asset && m.modifier).map((m) => [m.asset, m.modifier])),
         skin: +(style.skin ?? mine.find((m) => m.type === 'model_skin')?.skin ?? 0),
+        activities: mine.filter((m) => m.type === 'activity' && m.modifier).map((m) => [m.asset || 'ALL', m.modifier]),
+        // A companion beside him: a pet (with its loadout place and scale), or the look of a unit he
+        // summons (Lone Druid's bear, Juggernaut's healing ward), at a pet's place.
+        companion: (() => {
+          const pet = mine.find((x) => x.type === 'pet' && /\.vmdl$/.test(x.asset || ''));
+          const nums = (v, d) => (typeof v === 'string' ? v.trim().split(/\s+/).map(Number) : d);
+          if (pet) return { model: pet.asset, scale: +(pet.loadout_scale ?? 1), offset: nums(pet.loadout_hero_offsets?.[heroOf(item)], nums(pet.loadout_default_offset, [0, 100, 0])) };
+          const unit = mine.find((x) => x.type === 'entity_model' && /^npc_dota_(?!hero_)/.test(x.asset || '') && /\.vmdl$/.test(x.modifier || ''));
+          // Units are bigger than pets (Lone Druid's bear): a step further out.
+          return unit ? { model: unit.modifier, unit: unit.asset, scale: 1, offset: [-20, 150, 0] } : null;
+        })(),
+        // The hero's form it puts him in (loadGame's forms: a persona's number, or the item's model).
+        form: persona ? `persona${persona}` : (() => { const m = mine.find((x) => x.type === 'entity_model' && /^npc_dota_hero_/.test(x.asset || '') && /\.vmdl$/.test(x.modifier || '')); return m ? { npc: m.asset, model: m.modifier } : null; })(),
       };
     });
     const unsupported = [...new Set(modifiers.map((m) => m.type).filter((t) => UNSUPPORTED.has(t)))];
