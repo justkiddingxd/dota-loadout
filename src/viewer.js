@@ -320,7 +320,9 @@ async function buildHero(manifest, url, manager, time, light) {
   const fire = (ev) => {
     if (ev.stop) { for (const e of live) if (e.system === ev.system) { e.sim.stopEmission(); if (ev.instantly) e.kill = true; } return; }
     const def = manifest.systems?.[ev.system]; if (!def) return;
-    const drivers = ev.points ? ev.points.map(([att, type], cp) => att || cp === 0 ? { cp, type: type || (att ? 'PATTACH_POINT_FOLLOW' : 'PATTACH_ABSORIGIN_FOLLOW'), attachment: att, offset: null } : null).filter(Boolean) : driversFor(def, ev.config);
+    // Events give attach types in short (point_follow) or as the game's names (PATTACH_POINT_FOLLOW).
+    const attachType = (type, att) => (type ? (/^PATTACH_/.test(type) ? type : `PATTACH_${type.toUpperCase()}`) : att ? 'PATTACH_POINT_FOLLOW' : 'PATTACH_ABSORIGIN_FOLLOW');
+    const drivers = ev.points ? ev.points.map(([att, type], cp) => att || cp === 0 ? { cp, type: attachType(type, att), attachment: att, offset: null } : null).filter(Boolean) : driversFor(def, ev.config);
     live.push(Object.assign(instance(def, 'hero', drivers), { system: ev.system, sequence: ev.sequence, stopOnSeqChange: ev.stopOnSeqChange, born: 0 }));
   };
   let lastName = null, lastTime = 0;

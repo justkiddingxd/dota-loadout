@@ -114,22 +114,42 @@ export function pickAnimations(seqs, max = 24) {
   return { idle: idle?.name || null, entry: spawn?.name || null, list: list.map(({ name, activity, loop }) => ({ name, activity, loop })) };
 }
 
+// What a shown animation is made of: a sequence (ASEQ) plays local animations by index into
+// m_localSequenceNameArray, which may be sequences again (run_anim → @@run_anim → @run_anim). Events sit
+// on any of them (Marci's Red Riding Hood taunt keeps its basket in @marci_red_riding_hood_skip).
+// Returns name → the shown animations it belongs to.
+function sourcesOf(dump, names) {
+  const i = dump.indexOf('m_localSequenceNameArray = '), list = i < 0 ? [] : [...dump.slice(i, dump.indexOf(']', i)).matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+  const refs = new Map();
+  for (const m of dump.matchAll(/\n\t\t\tm_sName = "([^"]+)"/g)) {
+    const next = dump.indexOf('\n\t\t\tm_sName = "', m.index + 10), body = dump.slice(m.index, next < 0 ? undefined : next), r = /m_localReferenceArray = \[([^\]]*)\]/.exec(body);
+    if (r && !refs.has(m[1])) refs.set(m[1], r[1].split(',').map((x) => list[+x]).filter(Boolean));
+  }
+  const owners = new Map();
+  for (const name of names) {
+    const stack = [name, `@${name}`, `@@${name}`], seen = new Set();
+    while (stack.length) { const n = stack.pop(); if (seen.has(n)) continue; seen.add(n); if (!owners.has(n)) owners.set(n, new Set()); owners.get(n).add(name); for (const r of refs.get(n) || []) stack.push(r); }
+  }
+  return owners;
+}
+
 // Props an animation brings in (AE_CL_CREATE_ANIM_SCOPE_PROP: Pudge's clown car, Largo's frogs,
 // Ringmaster's box): a model of its own that lives while the animation plays, at the hero or one of
 // his attachments, playing the sequence of its own model named by the event's activity.
 // names: the hero's animations that are shown; '@'-prefixed sources of a sequence count as it.
 export function scopeProps(dump, names) {
-  const owners = [...dump.matchAll(/\n\t\t\tm_s?[Nn]ame = "([^"]+)"/g)].map((m) => [m.index, m[1]]), wanted = new Set(names), props = [], seen = new Set();
+  const owners = [...dump.matchAll(/\n\t\t\tm_s?[Nn]ame = "([^"]+)"/g)].map((m) => [m.index, m[1]]), shown = sourcesOf(dump, names), props = [], seen = new Set();
   for (const m of dump.matchAll(/\n(\t+)\{\n\1\tm_nFrame = (-?\d+)([\s\S]*?)\n\1\}/g)) {
     const body = m[3]; if (!body.includes('"AE_CL_CREATE_ANIM_SCOPE_PROP"')) continue;
-    const owner = owners.filter(([i]) => i < m.index).pop()?.[1]?.replace(/^@+/, '');
-    if (!wanted.has(owner)) continue;
+    const owner = owners.filter(([i]) => i < m.index).pop()?.[1];
+    for (const sequence of shown.get(owner) || []) {
     const prop = {
-      sequence: owner, frame: +m[2], model: /name = resource:"([^"]+\.vmdl)"/.exec(body)?.[1], attachment: /attachment = "([^"]*)"/.exec(body)?.[1] || null,
+      sequence, frame: +m[2], model: /name = resource:"([^"]+\.vmdl)"/.exec(body)?.[1], attachment: /attachment = "([^"]*)"/.exec(body)?.[1] || null,
       parent: !/parent = false/.test(body), activity: /activity = "([^"]*)"/.exec(body)?.[1] || null,
     };
     const key = JSON.stringify(prop); if (!prop.model || seen.has(key)) continue;
     seen.add(key); props.push(prop);
+    }
   }
   return props;
 }
@@ -138,18 +158,20 @@ export function scopeProps(dump, names) {
 // (the system's own control point configuration by name), AE_CL_CREATE_PARTICLE_EFFECT (control
 // points 0 and 1 at attachments given in the event) and AE_CL_STOP_PARTICLE_EFFECT.
 export function particleEvents(dump, names) {
-  const owners = [...dump.matchAll(/\n\t\t\tm_s?[Nn]ame = "([^"]+)"/g)].map((m) => [m.index, m[1]]), wanted = new Set(names), events = [], seen = new Set();
+  const owners = [...dump.matchAll(/\n\t\t\tm_s?[Nn]ame = "([^"]+)"/g)].map((m) => [m.index, m[1]]), shown = sourcesOf(dump, names), events = [], seen = new Set();
   for (const m of dump.matchAll(/\n(\t+)\{\n\1\tm_nFrame = (-?\d+)([\s\S]*?)\n\1\}/g)) {
     const body = m[3], type = /m_sEventName = "(AE_CL_(?:CREATE|STOP)_PARTICLE_EFFECT(?:_CFG)?)"/.exec(body)?.[1]; if (!type) continue;
-    const owner = owners.filter(([i]) => i < m.index).pop()?.[1]?.replace(/^@+/, ''); if (!wanted.has(owner)) continue;
+    const owner = owners.filter(([i]) => i < m.index).pop()?.[1];
     const system = /name = resource:"([^"]+)\.vpcf"/.exec(body)?.[1]; if (!system) continue;
+    for (const sequence of shown.get(owner) || []) {
     const str = (k) => new RegExp(`\\b${k} = "([^"]*)"`).exec(body)?.[1] ?? null, bool = (k) => new RegExp(`\\b${k} = true`).test(body);
-    const e = { sequence: owner, cycle: +(/m_flCycle = ([-\d.e]+)/.exec(body)?.[1] ?? 0), system };
+    const e = { sequence, cycle: +(/m_flCycle = ([-\d.e]+)/.exec(body)?.[1] ?? 0), system };
     if (type === 'AE_CL_STOP_PARTICLE_EFFECT') Object.assign(e, { stop: true, instantly: bool('stop_instantly') });
     else if (type === 'AE_CL_CREATE_PARTICLE_EFFECT_CFG') Object.assign(e, { config: str('config') || '', stopOnSeqChange: bool('stop_on_seq_change') });
     else Object.assign(e, { stopOnSeqChange: bool('stop_on_seq_change'), points: [[str('attachment_point'), str('attachment_type')], [str('attachment_point_cp1'), str('attachment_type_cp1')]] });
     const key = JSON.stringify(e); if (seen.has(key)) continue;
     seen.add(key); events.push(e);
+    }
   }
   return events;
 }
