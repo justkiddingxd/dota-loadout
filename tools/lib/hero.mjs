@@ -19,8 +19,9 @@ import { compact, readGlb, readPng, writeGlb } from './files.mjs';
 import { particleEvents, pickAnimations, scopeProps, sequences } from './game.mjs';
 import { parseKV3 } from '../kv3.mjs';
 
-// The viewer's card for sprites without a texture of their own (src/fx.js Library.texture).
-const GLOW = 'materials/particle/particle_glow_05.vtex';
+// The viewer's cards for sprites without a texture of their own, and with one the game lacks
+// (src/fx.js Library.texture).
+const GLOW = 'materials/particle/particle_glow_05.vtex', SOFT_GLOW = 'materials/particle/particle_glow_01.vtex';
 const exec = promisify(execFile);
 
 // game: the game's folder (…/dota, with gameinfo.gi); cli: Source2Viewer-CLI; hero: an entry of
@@ -30,8 +31,11 @@ export async function buildHero({ game, cli, hero, out, temp, log = () => {} }) 
   const has = (path) => existsSync(join(game, `${path}_c`));
   const run = async (args) => (await exec(cli, args, { encoding: 'utf8', maxBuffer: 1 << 30 })).stdout;
   const decompile = async (path, target) => { mkdirSync(dirname(target), { recursive: true }); await run(['-i', join(game, `${path}_c`), '--game', gameinfo, '-d', '-o', target]); };
+  // A hero's catalog of items (tools/build-items.mjs) outlives his rebuild.
+  const catalog = join(out, 'items.json'), kept = existsSync(catalog) ? readFileSync(catalog) : null;
   rmSync(out, { recursive: true, force: true }); rmSync(temp, { recursive: true, force: true });
   for (const d of ['models', 'textures', 'fx']) mkdirSync(join(out, d), { recursive: true });
+  if (kept) writeFileSync(catalog, kept);
   mkdirSync(temp, { recursive: true });
 
   // ---------------------------------------------------------------- models and animations
@@ -300,7 +304,9 @@ export async function buildBundle({ game, cli, out, temp, log = () => {}, MODELS
   // A sprite card without a texture, or with one the game does not have (the seasonal unusual
   // effects' light_glow_01), draws the soft glow the viewer takes for it: it comes along.
   const sprites = Object.values(systems).flatMap((s) => (s.m_Renderers || []).filter((r) => /Sprites|Ropes|Trails/.test(r._class)));
-  if (sprites.some((r) => { const t = r.m_vecTexturesInput?.[0]?.m_hTexture || r.m_hTexture; return !t || !has(t); })) textureSet.add(GLOW);
+  const named = sprites.map((r) => r.m_vecTexturesInput?.[0]?.m_hTexture || r.m_hTexture);
+  if (named.some((t) => !t)) textureSet.add(GLOW);
+  if (named.some((t) => t && !has(t))) textureSet.add(SOFT_GLOW);
   for (const vtex of [...textureSet].sort()) {
     if (!has(vtex)) continue;
     const base = basename(vtex, '.vtex'), dir = join(temp, 'vtex', base), name = vtex.replace(/^materials\/particle\//, '').replace(/\.vtex$/, '').replace(/\//g, '__');

@@ -772,7 +772,9 @@ const OP = {
   // Control points for this system and its children.
   C_OP_SetSingleControlPointPosition(d) {
     const cp = d.m_nCP1 ?? 1, pos = vector(d.m_vecCP1Pos, [128, 0, 0]), once = d.m_bSetOnce, world = d.m_bUseWorldLocation, head = d.m_nHeadLocation ?? 0; let done = false;
-    return (ps, dt, s) => { if (once && done) return; const v = pos(null, s).clone(); if (!world) v.applyMatrix4(s.cp(head).matrix()); s.setCP(cp, v); done = true; };
+    // From the head point, unturned: the offset is as often a value as a place (Ravenblight's CP 2 =
+    // 1, 0, 0 turns its gold on), and the hero's turn on the turntable is no turn of the game's.
+    return (ps, dt, s) => { if (once && done) return; const v = pos(null, s).clone(); if (!world) v.add(s.cp(head).pos); s.setCP(cp, v); done = true; };
   },
   C_OP_SetControlPointPositions(d) {
     const cps = [[d.m_nCP1 ?? 1, d.m_vecCP1Pos ?? [128, 0, 0]], [d.m_nCP2 ?? 2, d.m_vecCP2Pos ?? [0, 128, 0]], [d.m_nCP3 ?? 3, d.m_vecCP3Pos ?? [-128, 0, 0]], [d.m_nCP4 ?? 4, d.m_vecCP4Pos ?? [0, -128, 0]]];
@@ -1351,7 +1353,8 @@ export class Simulation {
     this.ops = build(def.m_Operators, OP);
     this.constraints = build(def.m_Constraints, OP);
     this.passes = this.constraints.length ? Math.max(1, ...(def.m_Operators || []).filter((o) => o._class === 'C_OP_BasicMovement' && !o.m_bDisableOperator).map((o) => o.m_nMaxConstraintPasses ?? 3)) : 1;
-    this.renderers = (def.m_Renderers || []).filter((r) => !r.m_bDisableOperator).map((r) => lib.renderer(r, this)).filter(Boolean);
+    // A renderer has a strength too: at 0 it draws nothing (Ravenblight's CP 2 picks its feathers' material).
+    this.renderers = (def.m_Renderers || []).filter((r) => !r.m_bDisableOperator).map((r) => { const x = lib.renderer(r, this); if (x && r.m_flOpStrength !== undefined) x.strength = strength(r); return x; }).filter(Boolean);
     this.snapshot = def.m_hSnapshot ? lib.snapshot(def.m_hSnapshot) : null; if (this.snapshot) this.snapshot.sim = this;
     for (const c of def.m_Children || []) {
       if (c.m_bEndCap || c.m_bDisableChild) continue;
@@ -1414,7 +1417,7 @@ export class Simulation {
   // C_OP_RestartAfterDuration: the emitters start over, as do the children's; the particles alive live
   // on. A stopped effect stays stopped.
   restart() { const s = this.state; s.restartAt = undefined; if (this.stopped) return; s.start = s.age; for (const e of this.emitters) e.fn.reset(); for (const c of this.children) c.restart(); }
-  render(camera, groupInverse) { for (const r of this.renderers) r.update(this.particles, this.state, camera, groupInverse); for (const c of this.children) c.render(camera, groupInverse); }
+  render(camera, groupInverse) { for (const r of this.renderers) r.update(r.strength && r.strength(this.state) <= 0 ? [] : this.particles, this.state, camera, groupInverse); for (const c of this.children) c.render(camera, groupInverse); }
   *all() { yield this; for (const c of this.children) yield* c.all(); }
   count() { let n = this.particles.length; for (const c of this.children) n += c.count(); return n; }
 }
@@ -1490,7 +1493,8 @@ function sheetFrame(info, p, rate, type) {
   for (let i = 0; i < seq.frames.length; i++) { const f = seq.frames[i]; if (pos < f.time || i === seq.frames.length - 1) { const n = seq.clamp ? Math.min(i + 1, seq.frames.length - 1) : (i + 1) % seq.frames.length; return { a: f.uv, b: seq.frames[n].uv, fa: f, fb: seq.frames[n], t: f.time > 0 ? saturate(pos / f.time) : 0 }; } pos -= f.time; }
   return null;
 }
-const GLOW = 'materials/particle/particle_glow_05.vtex';
+// A sprite's texture when it names none, and in place of one the game lacks (a broader glow).
+const GLOW = 'materials/particle/particle_glow_05.vtex', SOFT_GLOW = 'materials/particle/particle_glow_01.vtex';
 const FULL = [0, 0, 1, 1], Z = new THREE.Vector3(0, 0, 1);
 // Screen-facing basis in the particle space, from the camera.
 function billboard(camera, groupInverse) {
@@ -1508,6 +1512,9 @@ class SpriteRenderer {
     // Cards lying in a plane fade as they turn edge-on to the eye: full where the dot of their normal
     // and the way to the eye is the start one, gone at the end one (the defaults, 1 and 2, never fade).
     this.dotStart = r.m_flStartFadeDot ?? 1; this.dotEnd = r.m_flEndFadeDot ?? 2;
+    // Depth bias: the card drawn nearer the eye by that much (negative) so the model it lies on does
+    // not cut it — a glow round an item stays whole over it.
+    this.bias = typeof r.m_flDepthBias === 'number' ? r.m_flDepthBias : 0;
   }
   update(ps, s, camera, gi) {
     const b = this.batch, { right, up, eye } = billboard(camera, gi); b.begin();
@@ -1526,6 +1533,7 @@ class SpriteRenderer {
       const c = Math.cos(p.rot.z), sn = Math.sin(p.rot.z), rr = R.clone().multiplyScalar(c).addScaledVector(U, sn).multiplyScalar(r), uu = U.clone().multiplyScalar(c).addScaledVector(R, -sn).multiplyScalar(r);
       // Sheet frames are cropped to their content: the card shrinks to the crop window, as in the game.
       const o = p.pos.clone(), f = sheetFrame(this.info, p, this.rate, this.type);
+      if (this.bias) { const toEye = eye.clone().sub(o), d = toEye.length(); if (d > 1e-3) o.addScaledVector(toEye, Math.min(-this.bias, d * 0.9) / d); }
       let uvA = FULL, uvB = FULL;
       if (f) {
         const win = (fr) => { const [u0, v0, u1, v1] = fr.uv, [c0, d0, c1, d1] = fr.crop || fr.uv, w = u1 - u0 || 1, h = v1 - v0 || 1; return [(c0 - u0) / w, (d0 - v0) / h, (c1 - u0) / w, (d1 - v0) / h]; };
@@ -1639,10 +1647,10 @@ export class Library {
   // Colour textures are read as sRGB, except for mod2x: its «modulate» textures are 50 % grey where
   // they leave the picture alone, which as sRGB would be 21 % linear and darken the whole square.
   texture(r) {
-    // Without a texture, or with one the game lacks (the seasonal unusual effects' light glow), an
-    // additive card is a soft glow.
+    // Without a texture, or with one the game lacks (the seasonal unusual effects' light glow: their
+    // halo round the item), an additive card is a soft glow; others would cover what they lie on.
     let path = r.m_vecTexturesInput?.[0]?.m_hTexture || r.m_hTexture || GLOW;
-    if (!this.textures[path] && r.m_nOutputBlendMode === 'PARTICLE_OUTPUT_BLEND_MODE_ADD') path = GLOW;
+    if (!this.textures[path] && r.m_nOutputBlendMode === 'PARTICLE_OUTPUT_BLEND_MODE_ADD') path = this.textures[SOFT_GLOW] && path !== GLOW ? SOFT_GLOW : GLOW;
     const raw = r.m_nOutputBlendMode === 'PARTICLE_OUTPUT_BLEND_MODE_MOD2X', key = raw ? `${path}#raw` : path;
     if (!this.cache.has(key)) {
       // options.onTexture: a texture once loaded (the viewer shrinks them on phones).
