@@ -592,10 +592,11 @@ const OP = {
   },
   C_OP_SetVec(d) { const v = vector(d.m_InputValue), out = field(d.m_nOutputField, F.Color); return (ps, dt, s) => { for (const p of ps) p.setV(out, v(p, s).clone()); }; },
   // The end cap (the effect stopped): its particles go after a time, a value going to another first.
-  C_OP_EndCapTimedDecay(d) { const time = d.m_flDecayTime ?? 1; return (ps, dt, s) => { if (s.age - s.endedAt >= time) for (const p of ps) p.dead = true; }; },
+  // Nothing before it, whatever the operator's end-cap state says (Marci's basket marks none).
+  C_OP_EndCapTimedDecay(d) { const time = d.m_flDecayTime ?? 1; return (ps, dt, s) => { if (s.endedAt !== undefined && s.age - s.endedAt >= time) for (const p of ps) p.dead = true; }; },
   C_OP_LerpEndCapScalar(d) {
     const out = field(d.m_nFieldOutput, F.Alpha), to = d.m_flOutput ?? 1, time = d.m_flLerpTime ?? 1;
-    return (ps, dt, s) => { const k = time > 0 ? saturate((s.age - s.endedAt) / time) : 1; for (const p of ps) { p.capFrom ??= p.getS(out); p.setS(out, lerp(p.capFrom, to, k)); } };
+    return (ps, dt, s) => { if (s.endedAt === undefined) return; const k = time > 0 ? saturate((s.age - s.endedAt) / time) : 1; for (const p of ps) { p.capFrom ??= p.getS(out); p.setS(out, lerp(p.capFrom, to, k)); } };
   },
   // Lights, speed-to-CP links: nothing to draw.
   C_OP_RemapSpeedtoCP: () => () => {},
