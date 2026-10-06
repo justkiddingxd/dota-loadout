@@ -3,7 +3,7 @@ import { HeroViewer } from '../src/index.js';
 const T = {
   ru: {
     search: 'Найти героя', attrs: { str: 'Сила', agi: 'Ловкость', int: 'Интеллект', all: 'Универсал' }, short: { str: 'STR', agi: 'AGI', int: 'INT', all: 'UNI' },
-    animations: 'Анимации', items: 'Предметы', sets: 'Сеты', defaultItem: 'Стандартный', findItem: 'Найти предмет', style: 'Стиль', gem: 'Призматический самоцвет', noGem: 'Без самоцвета', unusual: 'Необычный эффект', noUnusual: 'Нет', allDefault: 'Всё стандартное', noItems: 'Ничего не нашлось', reset: 'Сброс', embed: 'Встроить', copy: 'Копировать', copied: 'Скопировано',
+    animations: 'Анимации', items: 'Предметы', sets: 'Сеты', allHeroes: 'Все герои', heroes: 'Героев', changed: 'изменено', recenter: 'Вернуть вид', slots: 'слотов', defaultItem: 'Стандартный', findItem: 'Найти предмет', style: 'Стиль', gem: 'Призматический самоцвет', noGem: 'Без самоцвета', unusual: 'Необычный эффект', noUnusual: 'Нет', allDefault: 'Всё стандартное', noItems: 'Ничего не нашлось', reset: 'Сброс', embed: 'Встроить', copy: 'Копировать', copied: 'Скопировано',
     loading: 'Загрузка', failed: 'Не удалось загрузить героя', nothing: 'Никого не нашлось',
     hint: 'Тяни, чтобы повернуть  ·  колесо — ближе / дальше', hintTouch: 'Тяни, чтобы повернуть',
     colophon: 'Герои Dota 2 прямо в браузере: игровой шейдер, анимации и эффекты частиц. Код открыт под MIT, модели и текстуры принадлежат Valve.',
@@ -14,7 +14,7 @@ const T = {
   },
   en: {
     search: 'Find a hero', attrs: { str: 'Strength', agi: 'Agility', int: 'Intelligence', all: 'Universal' }, short: { str: 'STR', agi: 'AGI', int: 'INT', all: 'UNI' },
-    animations: 'Animations', items: 'Items', sets: 'Sets', defaultItem: 'Default', findItem: 'Find an item', style: 'Style', gem: 'Prismatic gem', noGem: 'No gem', unusual: 'Unusual effect', noUnusual: 'None', allDefault: 'All default', noItems: 'Nothing found', reset: 'Reset', embed: 'Embed', copy: 'Copy', copied: 'Copied',
+    animations: 'Animations', items: 'Items', sets: 'Sets', allHeroes: 'All heroes', heroes: 'Heroes', changed: 'changed', recenter: 'Recenter', slots: 'slots', defaultItem: 'Default', findItem: 'Find an item', style: 'Style', gem: 'Prismatic gem', noGem: 'No gem', unusual: 'Unusual effect', noUnusual: 'None', allDefault: 'All default', noItems: 'Nothing found', reset: 'Reset', embed: 'Embed', copy: 'Copy', copied: 'Copied',
     loading: 'Loading', failed: 'Could not load the hero', nothing: 'Nobody by that name',
     hint: 'Drag to turn  ·  wheel to zoom', hintTouch: 'Drag to turn',
     colophon: 'Dota 2 heroes live in the browser: the game’s hero shader, animations and particle effects. The code is MIT; models and textures belong to Valve.',
@@ -31,7 +31,8 @@ const stored = (() => { try { return localStorage.getItem('loadout-lang'); } cat
 let lang = stored || (/^(ru|uk|be|kk)/i.test(navigator.language) ? 'ru' : 'en');
 const t = () => T[lang];
 
-const state = { gems: {}, unusual: {}, palette: [], index: null, heroes: [], current: null, filter: new Set(), query: '', active: null, playing: null, catalog: null, worn: {}, drawer: null, itemQuery: '' };
+// open: the wardrobe's slot unfolded; tab: its items or sets.
+const state = { gems: {}, unusual: {}, palette: [], index: null, heroes: [], current: null, filter: new Set(), query: '', active: null, playing: null, catalog: null, worn: {}, open: null, tab: 'items', itemQuery: '' };
 
 // ---------------------------------------------------------------- viewer
 const canvas = $('[data-view]');
@@ -46,38 +47,47 @@ function applyTexts() {
   document.documentElement.lang = lang;
   $('[data-lang-toggle]').textContent = lang === 'ru' ? 'EN' : 'RU';
   $('[data-search]').placeholder = t().search;
-  $('[data-reset]').textContent = t().reset;
+  $('[data-reset]').textContent = t().recenter;
   $('[data-embed]').textContent = t().embed;
   $('[data-copy]').textContent = t().copy;
   $('[data-hint]').textContent = matchMedia('(pointer: coarse)').matches ? t().hintTouch : t().hint;
   for (const n of document.querySelectorAll('[data-t]')) n.textContent = t()[n.dataset.t];
   const attrs = $('[data-attrs]'); attrs.replaceChildren(...ATTRS.map((a) => {
     const b = el('button', { type: 'button', textContent: t().short[a], title: t().attrs[a] }); b.style.setProperty('--c', `var(--${a})`);
+    b.prepend(el('img', { src: `attributes/${a}.webp`, alt: '' }));
     b.setAttribute('aria-pressed', state.filter.has(a)); b.onclick = () => { state.filter.has(a) ? state.filter.delete(a) : state.filter.add(a); applyTexts(); renderList(); }; return b;
   }));
-  if (state.index) { $('[data-build]').textContent = `${t().build} ${state.index.game ?? '—'}`; renderList(); if (state.current) renderHero(state.current); renderRail(); if (state.drawer) renderDrawer(); }
+  if (state.index) { $('[data-build]').textContent = `${t().build} ${state.index.game ?? '—'}`; renderList(); if (state.current) renderHero(state.current); renderWardrobe(); }
 }
 
-// ---------------------------------------------------------------- roster
+// ---------------------------------------------------------------- heroes: the picker
+// A grid of the game's hero cards by attribute, over everything; / or the hero's name opens it.
 const nameOf = (h) => h.name[lang] || h.name.en;
 const num = (h) => String(h.heroId).padStart(3, '0');
+// The roster in the picker's order (attribute, then name): what the arrow keys step through.
+const ordered = () => ATTRS.flatMap((a) => state.heroes.filter((h) => h.attribute === a).sort((x, y) => nameOf(x).localeCompare(nameOf(y))));
 function renderList() {
   const q = state.query.trim().toLowerCase();
   const match = (h) => (!state.filter.size || state.filter.has(h.attribute)) && (!q || [h.name.en, h.name.ru, h.id].some((s) => s?.toLowerCase().includes(q)));
   const groups = ATTRS.map((a) => {
     const list = state.heroes.filter((h) => h.attribute === a && match(h)).sort((x, y) => nameOf(x).localeCompare(nameOf(y)));
     if (!list.length) return null;
-    const g = el('section', { className: 'group' }, el('h2', {}, el('span', { textContent: t().attrs[a] }), el('span', { textContent: String(list.length) })),
-      el('ol', {}, ...list.map((h) => el('li', {}, link(h)))));
+    const g = el('section', { className: 'group' }, el('h2', {}, el('img', { src: `attributes/${a}.webp`, alt: '' }), el('span', { textContent: t().attrs[a] }), el('small', { textContent: String(list.length) })),
+      el('div', { className: 'cards' }, ...list.map(card)));
     g.style.setProperty('--c', `var(--${a})`); return g;
   }).filter(Boolean);
   $('[data-list]').replaceChildren(...(groups.length ? groups : [el('p', { className: 'empty', textContent: t().nothing })]));
 }
-function link(h) {
-  const a = el('a', { className: 'hero-link', href: `#${h.id}` }, el('span', { className: 'n', textContent: num(h) }), el('span', { className: 't', textContent: nameOf(h) }));
+function card(h) {
+  const a = el('a', { className: 'card', href: `#${h.id}`, title: nameOf(h) }, el('img', { src: `heroes/${h.id}/card.webp`, alt: '', loading: 'lazy' }), el('span', { textContent: nameOf(h) }));
   a.dataset.id = h.id; if (state.current?.id === h.id) a.setAttribute('aria-current', 'true');
-  return a;
+  a.onclick = () => closePicker(); return a;
 }
+function openPicker() {
+  const p = $('[data-picker]'); p.hidden = false; document.body.classList.add('picking');
+  requestAnimationFrame(() => { p.classList.add('on'); $('[data-search]').focus(); $('.card[aria-current="true"]')?.scrollIntoView({ block: 'center' }); });
+}
+function closePicker() { const p = $('[data-picker]'); p.classList.remove('on'); document.body.classList.remove('picking'); setTimeout(() => { if (!p.classList.contains('on')) p.hidden = true; }, 200); }
 
 // ---------------------------------------------------------------- one hero
 // Valve's hype lines carry <b>; nothing else is kept.
@@ -94,7 +104,8 @@ function label(h, a) {
 function renderHero(h) {
   document.body.dataset.attr = h.attribute;
   document.title = `${nameOf(h)} — Loadout`;
-  $('[data-attr-name]').textContent = t().attrs[h.attribute];
+  $('[data-attr-name]').textContent = t().attrs[h.attribute]; $('[data-attr-icon]').src = `attributes/${h.attribute}.webp`;
+  $('[data-switch-icon]').src = `heroes/${h.id}/icon.webp`; $('[data-switch-name]').textContent = nameOf(h);
   $('[data-roles]').textContent = h.roles.map((r) => t().roles[r] || r).join(', ');
   $('[data-num]').textContent = num(h);
   $('[data-name]').textContent = nameOf(h);
@@ -104,7 +115,7 @@ function renderHero(h) {
     const [text, sub] = label(h, a), b = el('button', { type: 'button' }, text, sub ? el('small', { textContent: sub }) : null, el('i'));
     b.dataset.name = a.name; b.setAttribute('aria-pressed', state.active === a.name); b.onclick = () => play(a.name); return el('li', {}, b);
   }));
-  for (const a of document.querySelectorAll('.hero-link')) { if (a.dataset.id === h.id) a.setAttribute('aria-current', 'true'); else a.removeAttribute('aria-current'); }
+  for (const a of document.querySelectorAll('.card')) { if (a.dataset.id === h.id) a.setAttribute('aria-current', 'true'); else a.removeAttribute('aria-current'); }
   if (state.active) mark(state.active);
 }
 function ghost(text) {
@@ -151,7 +162,7 @@ async function open(id) {
   if (!h || state.current?.id === h.id) return;
   const ticket = ++loads;
   state.current = h; state.active = null; cancelAnimationFrame(state.playing);
-  state.catalog = null; state.worn = {}; state.form = null; state.animations = null; closeDrawer(); renderRail();
+  state.catalog = null; state.worn = {}; state.form = null; state.animations = null; state.open = null; renderWardrobe();
   renderHero(h); ghost(nameOf(h).toUpperCase());
   showLoading(h);
   try {
@@ -182,7 +193,7 @@ async function reload(ticket = ++loads) {
   if (ticket !== loads || !loaded) return;
   $('[data-status]').hidden = true;
   state.animations = loaded.animations; renderHero(h); mark(idleOf(h));
-  writeHash(); renderRail(); if (state.drawer) renderDrawer();
+  writeHash(); renderWardrobe();
   await Promise.all(Object.entries(state.worn).filter(([slot, w]) => w && applies(slot)).map(([slot, [id, style]]) => viewer.wear(slot, `items/${id}/`, style).catch((e) => console.error(e))));
   applyGems(); applyUnusual();
 }
@@ -227,14 +238,14 @@ const gemHex = (key) => state.palette.find((g) => g.key === key)?.hex || null;
 const takesGem = (slot) => { const w = state.worn[slot], it = w && state.catalog?.items[w[0]]; return !!(it && !it.default && it.prismatic); };
 function setGem(slot, key) {
   if (key && takesGem(slot) && gemHex(key)) state.gems[slot] = key; else delete state.gems[slot];
-  viewer.gem(slot, gemHex(state.gems[slot]) || null); writeHash(); if (state.drawer) renderDrawer();
+  viewer.gem(slot, gemHex(state.gems[slot]) || null); writeHash(); renderWardrobe();
 }
 const applyGems = () => { for (const slot of Object.keys(state.gems)) if (takesGem(slot) && applies(slot)) viewer.gem(slot, gemHex(state.gems[slot])); else delete state.gems[slot]; };
 // Unusual effects: those the item in a slot can roll (its catalog's unusual list), one at a time.
 const unusualsOf = (slot) => { const w = state.worn[slot], it = w && state.catalog?.items[w[0]]; return (it && !it.default && it.unusual) || []; };
 function setUnusual(slot, id) {
   if (id && unusualsOf(slot).some((u) => u.id === id)) state.unusual[slot] = id; else delete state.unusual[slot];
-  viewer.unusual(slot, state.unusual[slot] ?? null); writeHash(); if (state.drawer) renderDrawer();
+  viewer.unusual(slot, state.unusual[slot] ?? null); writeHash(); renderWardrobe();
 }
 const applyUnusual = () => { for (const slot of Object.keys(state.unusual)) if (applies(slot) && unusualsOf(slot).some((u) => u.id === state.unusual[slot])) viewer.unusual(slot, state.unusual[slot]); else delete state.unusual[slot]; };
 
@@ -245,7 +256,7 @@ async function wear(slot, id, style = 0) {
   if (state.worn[slot]?.[0] !== +id) { delete state.gems[slot]; viewer.gem(slot, null); delete state.unusual[slot]; viewer.unusual(slot, null); }
   state.worn[slot] = it && !it.default ? [+id, style] : null;
   if (formOf(state.worn) !== state.form) return reload();
-  writeHash(); renderRail(); if (state.drawer) renderDrawer();
+  writeHash(); renderWardrobe();
   await viewer.wear(slot, state.worn[slot] ? `items/${id}/` : null, style).catch((e) => console.error(e));
   if (state.gems[slot]) viewer.gem(slot, gemHex(state.gems[slot]));
   if (state.unusual[slot]) viewer.unusual(slot, state.unusual[slot]);
@@ -262,79 +273,95 @@ function dress(worn) {
   }
   writeHash();
 }
-function renderRail() {
-  const rail = $('[data-rail]'), c = state.catalog;
-  rail.hidden = !c?.slots.length; if (!c) return rail.replaceChildren();
-  const buttons = c.slots.filter((s) => applies(s.name)).map((s) => {
-    const id = shownIn(s.name), icon = id && iconOf(id, state.worn[s.name]?.[1]), b = el('button', { type: 'button', title: s.text[lang] || s.text.en }, el('span', { textContent: s.text[lang] || s.text.en }));
-    if (icon) b.style.backgroundImage = `url("${icon}")`;
-    b.classList.toggle('changed', !!state.worn[s.name]); b.setAttribute('aria-expanded', state.drawer === s.name);
-    b.onclick = () => (state.drawer === s.name ? closeDrawer() : openDrawer(s.name)); return b;
-  });
-  if (c.sets.length) { const b = el('button', { type: 'button', className: 'sets', textContent: t().sets }); b.setAttribute('aria-expanded', state.drawer === '#sets'); b.onclick = () => (state.drawer === '#sets' ? closeDrawer() : openDrawer('#sets')); buttons.push(b); }
-  rail.replaceChildren(...buttons);
+// The wardrobe: a row for each slot (what it wears, its rarity); one row unfolds into the slot's items
+// and, for what it wears, its styles, unusual effects and gem. The other tab lists the sets.
+const slotName = (s) => s.text[lang] || s.text.en;
+function renderWardrobe() {
+  const c = state.catalog, body = $('[data-wd-body]'), box = $('[data-wardrobe]');
+  for (const b of document.querySelectorAll('[data-tab]')) b.setAttribute('aria-selected', b.dataset.tab === state.tab);
+  $('[data-tab="sets"]').hidden = !c?.sets.length;
+  const changed = Object.values(state.worn).filter(Boolean).length;
+  $('[data-reset-all]').hidden = !changed;
+  box.classList.toggle('empty', !c?.slots.length);
+  if (!c) return body.replaceChildren();
+  if (state.tab === 'sets' && c.sets.length) return body.replaceChildren(...c.sets.map(setRow));
+  body.replaceChildren(...c.slots.filter((s) => applies(s.name)).map(slotRow));
 }
-function openDrawer(which) { state.drawer = which; state.itemQuery = ''; $('[data-item-search]').value = ''; $('[data-drawer]').hidden = false; renderDrawer(); renderRail(); }
-function closeDrawer() { state.drawer = null; $('[data-drawer]').hidden = true; renderRail(); }
+function slotRow(s) {
+  const id = shownIn(s.name), it = id && state.catalog.items[id], open = state.open === s.name, w = state.worn[s.name];
+  const head = el('button', { type: 'button', className: 'slot-head' },
+    el('span', { className: 'thumb' }, iconOf(id, w?.[1]) ? el('img', { src: iconOf(id, w?.[1]), alt: '', loading: 'lazy' }) : null),
+    el('span', { className: 'what' }, el('small', { textContent: slotName(s) }), el('b', { textContent: it ? itemName(it) : '—' })),
+    el('span', { className: 'marks' }, state.unusual[s.name] ? el('i', { className: 'mark unusual', title: t().unusual }) : null, state.gems[s.name] ? el('i', { className: 'mark gem', style: `--g: ${gemHex(state.gems[s.name])}`, title: t().gem }) : null, el('span', { className: 'count', textContent: String(s.items.length) })));
+  head.setAttribute('aria-expanded', open); head.onclick = () => { state.open = open ? null : s.name; state.itemQuery = ''; renderWardrobe(); if (!open) requestAnimationFrame(() => $('.slot.open')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })); };
+  const row = el('section', { className: `slot${open ? ' open' : ''}${w ? ' changed' : ''}` }, head);
+  if (it) row.style.setProperty('--r', RARITY[it.rarity] || 'var(--line-2)');
+  if (open) row.append(slotBody(s));
+  return row;
+}
+function slotBody(s) {
+  const c = state.catalog, which = s.name, current = shownIn(which), q = state.itemQuery.trim().toLowerCase(), parts = [];
+  // What it wears first: its styles, unusual effects and gem.
+  const it = c.items[current], style = state.worn[which]?.[1] || 0;
+  if (it && it.styles.length > 1) parts.push(options(t().style, it.styles.map((st, i) => [st.name?.[lang] || st.name?.en || String(i + 1), i === style, () => wear(which, current, i)])));
+  const rolls = unusualsOf(which);
+  if (rolls.length) { const now = state.unusual[which] ?? null; parts.push(options(t().unusual, [[t().noUnusual, now === null, () => setUnusual(which, null)], ...rolls.map((u) => [u.name[lang] || u.name.en, u.id === now, () => setUnusual(which, u.id)])], 'unusual')); }
+  if (takesGem(which) && state.palette.length) {
+    const now = state.gems[which] || null, none = el('button', { type: 'button', className: 'none', title: t().noGem }); none.setAttribute('aria-pressed', !now); none.onclick = () => setGem(which, null);
+    parts.push(el('div', { className: 'opt gems' }, el('span', { className: 'opt-label', textContent: t().gem }), el('div', { className: 'swatches' }, none, ...state.palette.map((g) => { const b = el('button', { type: 'button', title: g.name[lang] || g.name.en }); b.style.setProperty('--g', g.hex); b.setAttribute('aria-pressed', g.key === now); b.onclick = () => setGem(which, g.key); return b; }))));
+  }
+  // Then its items: a search for a long list.
+  if (s.items.length > 12) {
+    const input = el('input', { type: 'search', autocomplete: 'off', spellcheck: false, placeholder: t().findItem, value: state.itemQuery });
+    input.oninput = () => { state.itemQuery = input.value; const grid = input.closest('.slot-body').querySelector('.tiles'); grid.replaceWith(tiles(s)); };
+    input.onkeydown = (e) => { if (e.key === 'Escape') { state.open = null; renderWardrobe(); } };
+    parts.push(el('label', { className: 'item-search' }, input));
+  }
+  parts.push(tiles(s));
+  return el('div', { className: 'slot-body' }, ...parts);
+}
+function tiles(s) {
+  const c = state.catalog, current = shownIn(s.name), q = state.itemQuery.trim().toLowerCase();
+  const ids = s.items.filter((id) => !q || itemName(c.items[id]).toLowerCase().includes(q));
+  if (!ids.length) return el('p', { className: 'tiles empty-items', textContent: t().noItems });
+  return el('div', { className: 'tiles' }, ...ids.map((id) => tile(id, id === current, () => wear(s.name, id), c.items[id].default ? `${t().defaultItem} · ${itemName(c.items[id])}` : itemName(c.items[id]))));
+}
+function options(label, list, kind = '') {
+  return el('div', { className: `opt ${kind}` }, el('span', { className: 'opt-label', textContent: label }), el('div', { className: 'chips' }, ...list.map(([text, on, act]) => { const b = el('button', { type: 'button', textContent: text }); b.setAttribute('aria-pressed', on); b.onclick = act; return b; })));
+}
+function setRow(set) {
+  const c = state.catalog, on = set.items.every((id) => state.worn[c.items[id].slot]?.[0] === id);
+  const b = el('button', { type: 'button', className: `set${on ? ' on' : ''}` }, el('span', { className: 'icons' }, ...set.items.map((id) => el('img', { src: iconOf(id) || '', alt: '', loading: 'lazy' }))), el('b', { textContent: set.name?.[lang] || set.name?.en || set.key }));
+  b.onclick = () => { const worn = { ...state.worn }; for (const id of set.items) worn[c.items[id].slot] = [id, 0]; dress(worn); renderWardrobe(); };
+  return b;
+}
 function tile(id, pressed, onclick, label) {
   const it = state.catalog.items[id], icon = id && iconOf(id), b = el('button', { type: 'button', className: 'tile', title: label }, icon ? el('img', { src: icon, alt: '', loading: 'lazy' }) : el('i', { className: 'blank' }), el('b', { textContent: label }));
   if (it) b.style.setProperty('--r', RARITY[it.rarity] || 'var(--line-2)'); b.setAttribute('aria-pressed', pressed); b.onclick = onclick; return b;
 }
-function renderDrawer() {
-  const c = state.catalog, which = state.drawer, q = state.itemQuery.trim().toLowerCase(), body = $('[data-drawer-body]'), styles = $('[data-styles]');
-  if (!c || !which) return;
-  $('[data-item-search]').placeholder = t().findItem;
-  if (which === '#sets') {
-    $('[data-drawer-title]').textContent = t().sets; styles.hidden = true;
-    const sets = c.sets.filter((s) => !q || (s.name?.[lang] || s.name?.en || s.key).toLowerCase().includes(q));
-    const reset = el('button', { type: 'button', className: 'set' }, el('b', { textContent: t().allDefault })); reset.onclick = () => { state.worn = {}; reload(); };
-    body.replaceChildren(reset, ...sets.map((s) => {
-      const b = el('button', { type: 'button', className: 'set' }, el('b', { textContent: s.name?.[lang] || s.name?.en || s.key }), el('span', { className: 'icons' }, ...s.items.map((id) => el('img', { src: iconOf(id) || '', alt: '', loading: 'lazy' }))));
-      b.onclick = () => { const worn = { ...state.worn }; for (const id of s.items) worn[c.items[id].slot] = [id, 0]; dress(worn); }; return b;
-    }));
-    return;
-  }
-  const slot = c.slots.find((s) => s.name === which), current = shownIn(which);
-  $('[data-drawer-title]').textContent = slot.text[lang] || slot.text.en;
-  const ids = slot.items.filter((id) => !q || itemName(c.items[id]).toLowerCase().includes(q));
-  body.replaceChildren(ids.length ? el('div', { className: 'tiles' }, ...ids.map((id) => tile(id, id === current, () => wear(which, id), c.items[id].default ? `${t().defaultItem} · ${itemName(c.items[id])}` : itemName(c.items[id])))) : el('p', { className: 'empty-items', textContent: t().noItems }));
-  // The styles of what the slot wears.
-  const it = c.items[current], style = state.worn[which]?.[1] || 0;
-  styles.hidden = !(it && it.styles.length > 1);
-  if (!styles.hidden) styles.replaceChildren(el('span', { textContent: t().style }), ...it.styles.map((s, i) => { const b = el('button', { type: 'button', textContent: s.name?.[lang] || s.name?.en || String(i + 1) }); b.setAttribute('aria-pressed', i === style); b.onclick = () => wear(which, current, i); return b; }));
-  // A prismatic gem for what the slot wears, when it takes one.
-  const gems = $('[data-gems]'); gems.hidden = !(takesGem(which) && state.palette.length);
-  if (!gems.hidden) {
-    const now = state.gems[which] || null, label = el('span', { textContent: t().gem });
-    const none = el('button', { type: 'button', className: 'none', title: t().noGem }); none.setAttribute('aria-pressed', !now); none.onclick = () => setGem(which, null);
-    gems.replaceChildren(label, none, ...state.palette.map((g) => { const b = el('button', { type: 'button', title: g.name[lang] || g.name.en }); b.style.setProperty('--g', g.hex); b.setAttribute('aria-pressed', g.key === now); b.onclick = () => setGem(which, g.key); return b; }));
-  }
-  // The unusual effects it can roll.
-  const unusual = $('[data-unusual]'), rolls = unusualsOf(which); unusual.hidden = !rolls.length;
-  if (rolls.length) {
-    const now = state.unusual[which] ?? null, button = (text, id) => { const b = el('button', { type: 'button', textContent: text }); b.setAttribute('aria-pressed', id === now); b.onclick = () => setUnusual(which, id); return b; };
-    unusual.replaceChildren(el('span', { textContent: t().unusual }), button(t().noUnusual, null), ...rolls.map((u) => button(u.name[lang] || u.name.en, u.id)));
-  }
-}
-$('[data-drawer-close]').onclick = closeDrawer;
-$('[data-item-search]').addEventListener('input', (e) => { state.itemQuery = e.target.value; renderDrawer(); });
-$('[data-item-search]').addEventListener('keydown', (e) => { if (e.key === 'Escape') closeDrawer(); });
+for (const b of document.querySelectorAll('[data-tab]')) b.onclick = () => { state.tab = b.dataset.tab; renderWardrobe(); };
+$('[data-reset-all]').onclick = () => { state.worn = {}; state.gems = {}; state.unusual = {}; state.open = null; reload(); };
 
 // ---------------------------------------------------------------- controls
 $('[data-lang-toggle]').onclick = () => { lang = lang === 'ru' ? 'en' : 'ru'; try { localStorage.setItem('loadout-lang', lang); } catch { /* private mode */ } applyTexts(); if (state.current) ghost(nameOf(state.current).toUpperCase()); };
 $('[data-search]').addEventListener('input', (e) => { state.query = e.target.value; renderList(); });
 $('[data-search]').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') { const first = document.querySelector('.hero-link'); if (first) location.hash = first.dataset.id; e.target.blur(); }
-  if (e.key === 'Escape') { e.target.value = ''; state.query = ''; renderList(); e.target.blur(); }
+  if (e.key === 'Enter') { const first = document.querySelector('.card'); if (first) { location.hash = first.dataset.id; closePicker(); } }
+  if (e.key === 'Escape') { if (e.target.value) { e.target.value = ''; state.query = ''; renderList(); } else closePicker(); }
 });
+$('[data-open-picker]').onclick = openPicker;
+$('[data-close-picker]').onclick = closePicker;
+$('[data-picker]').addEventListener('click', (e) => { if (e.target === e.currentTarget) closePicker(); });
 $('[data-reset]').onclick = () => { viewer.rotate(0); viewer.zoom(1); };
 document.addEventListener('keydown', (e) => {
   if (e.target.matches('input, textarea') || e.metaKey || e.ctrlKey || e.altKey) return;
-  if (e.key === '/') { e.preventDefault(); $('[data-search]').focus(); return; }
+  if (e.key === 'Escape' && !$('[data-picker]').hidden) { closePicker(); return; }
+  if (e.key === '/') { e.preventDefault(); openPicker(); return; }
+  // Up and down step through the roster in the picker's order.
   if (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'j' || e.key === 'k') {
-    const links = [...document.querySelectorAll('.hero-link')], i = links.findIndex((a) => a.dataset.id === state.current?.id);
-    const next = links[(i + (e.key === 'ArrowDown' || e.key === 'j' ? 1 : -1) + links.length) % links.length];
-    if (next) { e.preventDefault(); location.hash = next.dataset.id; next.scrollIntoView({ block: 'nearest' }); }
+    const list = ordered(), i = list.findIndex((h) => h.id === state.current?.id);
+    const next = list[(i + (e.key === 'ArrowDown' || e.key === 'j' ? 1 : -1) + list.length) % list.length];
+    if (next) { e.preventDefault(); location.hash = next.id; }
   }
   if (e.key === 'ArrowLeft') viewer.rotate(-0.6, { relative: true });
   if (e.key === 'ArrowRight') viewer.rotate(0.6, { relative: true });
@@ -345,7 +372,7 @@ window.addEventListener('hashchange', () => {
   // The gems it names, in the items it names (those still loading take theirs when they are on).
   for (const slot of new Set([...Object.keys(state.gems), ...Object.keys(gems)])) { if (gems[slot] && state.worn[slot]) state.gems[slot] = gems[slot]; else delete state.gems[slot]; viewer.gem(slot, gemHex(state.gems[slot]) || null); }
   for (const slot of new Set([...Object.keys(state.unusual), ...Object.keys(unusual)])) { if (unusual[slot] && state.worn[slot]) state.unusual[slot] = unusual[slot]; else delete state.unusual[slot]; viewer.unusual(slot, state.unusual[slot] ?? null); }
-  writeHash(); if (state.drawer) renderDrawer();
+  writeHash(); renderWardrobe();
 });
 
 const dialog = $('[data-embed-dialog]');
@@ -371,8 +398,6 @@ $('[data-copy]').onclick = async () => {
   try { await navigator.clipboard.writeText($('[data-embed-code]').textContent); $('[data-copy]').textContent = t().copied; setTimeout(() => { $('[data-copy]').textContent = t().copy; }, 1500); } catch { /* no clipboard */ }
 };
 
-const plate = document.querySelector('.plate');
-new ResizeObserver(() => document.documentElement.style.setProperty('--plate-h', `${plate.offsetHeight}px`)).observe(plate);
 
 // ---------------------------------------------------------------- start
 applyTexts();
@@ -381,9 +406,6 @@ try {
   state.palette = await fetch('gems.json').then((r) => (r.ok ? r.json() : null)).then((g) => g?.prismatic || []).catch(() => []);
   applyTexts();
   await open(parseHash().id || 'nevermore');
-  // The roster scrolls to the hero within itself; on a phone (one long page) the stage stays in view.
-  const list = $('[data-list]'), cur = document.querySelector('.hero-link[aria-current="true"]');
-  if (cur && list.scrollHeight > list.clientHeight) list.scrollTop = cur.offsetTop - list.offsetTop - list.clientHeight / 2;
 } catch (e) {
   $('[data-status-text]').textContent = t().failed; $('[data-status]').classList.add('error'); console.error(e);
 }
