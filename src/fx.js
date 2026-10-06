@@ -23,6 +23,18 @@ const saturate = (x) => Math.min(1, Math.max(0, x));
 const remap = (x, a, b) => (b === a ? (x >= b ? 1 : 0) : (x - a) / (b - a));
 const remapClamped = (x, a, b, c, d) => lerp(c, d, saturate(remap(x, a, b)));
 const bias = (x, b) => x / ((1 / b - 2) * (1 - x) + 1);
+// ParticleMath.BiasFromParameter (Source 2 Viewer): the parameter runs from -1 to 1, 0 leaving the
+// value as it is; exponential bias makes it an exponent from 20 down to 0.
+function biasFrom(x, p, type) {
+  if (type === 'PF_BIAS_TYPE_EXPONENTIAL') {
+    const e = p >= 0 ? 1 - saturate(p) : 20 - saturate(p + 1) * 19;
+    return e <= 0 || x >= 1 ? 1 : x <= 0 ? 0 : Math.pow(x, Math.min(e, 20));
+  }
+  if (type !== 'PF_BIAS_TYPE_STANDARD' && type !== 'PF_BIAS_TYPE_GAIN') return 0;
+  const b = saturate((p + 1) * 0.5); if (b <= 0) return 0; if (b >= 1) return 1;
+  if (type === 'PF_BIAS_TYPE_GAIN') return x < 0.5 ? bias(x + x, b) * 0.5 : 1 - bias(2 - x - x, b) * 0.5;
+  return bias(x, b);
+}
 const withExponent = (exp, a, b) => lerp(a, b, exp === 1 ? rnd() : Math.pow(rnd(), exp));
 const vec = (a, d = [0, 0, 0]) => new THREE.Vector3(...(Array.isArray(a) ? a : d));
 function inUnitBall() { for (;;) { const v = new THREE.Vector3(rnd() * 2 - 1, rnd() * 2 - 1, rnd() * 2 - 1); const l = v.lengthSq(); if (l <= 1 && l > 1e-8) return { v: v.clone().normalize(), fraction: Math.cbrt(l) }; } }
@@ -93,9 +105,9 @@ function number(d, def = 0) {
     case 'PF_TYPE_LITERAL': { const v = d.m_flLiteralValue ?? 0; return () => v; }
     case 'PF_TYPE_RANDOM_UNIFORM': case 'PF_TYPE_RANDOM_BIASED': {
       const a = d.m_flRandomMin ?? 0, b = d.m_flRandomMax ?? 0, varying = d.m_nRandomMode === 'PF_RANDOM_MODE_VARYING', salt = (number.salt = (number.salt || 0) + 1);
-      const biased = d.m_nType === 'PF_TYPE_RANDOM_BIASED', bp = d.m_flBiasParameter ?? 0, exp = d.m_nBiasType === 'PF_BIAS_TYPE_EXPONENTIAL';
+      const biased = d.m_nType === 'PF_TYPE_RANDOM_BIASED', bp = d.m_flBiasParameter ?? 0, bt = d.m_nBiasType || 'PF_BIAS_TYPE_STANDARD';
       const flip = d.m_bHasRandomSignFlip;
-      return (p) => { let r = varying || !p ? rnd() : hash(p.uid + p.sys.seed, salt); if (biased) r = exp ? Math.pow(r, bp === 0 ? 1 : bp) : bias(r, bp || 0.5);
+      return (p) => { let r = varying || !p ? rnd() : hash(p.uid + p.sys.seed, salt); if (biased) r = biasFrom(r, bp, bt);
         const v = lerp(a, b, r); if (!flip) return v; const f = varying || !p ? rnd() : hash(p.uid + p.sys.seed, salt + 37); return f < 0.5 ? -v : v; };
     }
     case 'PF_TYPE_PARTICLE_FLOAT': case 'PF_TYPE_PARTICLE_INITIAL_FLOAT': { const f = field(d.m_nScalarAttribute, F.Radius); return (p) => map(p ? p.getS(f) : 0); }
@@ -913,10 +925,18 @@ export class Library {
   constructor({ systems, textures, snapshots, url, models = null, options = {} }) {
     this.models = models;
     this.options = options; this.systems = systems; this.textures = textures; this.snapshots = snapshots; this.url = url; this.cache = new Map(); this.unsupported = new Set();
+    // Snapshots worn items put in place of the hero's (Juggernaut's sword glow along another blade).
+    this.aliases = new Map();
     this.group = new THREE.Group(); this.group.matrixAutoUpdate = false; this.group.matrix.copy(SOURCE_TO_GLTF); this.loader = new THREE.TextureLoader();
     for (const [path, def] of Object.entries(systems || {})) if (def && !def._path) Object.defineProperty(def, '_path', { value: path });
   }
   system(path) { const k = path.replace(/\.vpcf$/, ''), d = this.systems[k]; return d || null; }
+  // An item's systems, textures (their files at full addresses) and snapshots, added to the hero's.
+  add({ systems = {}, textures = {}, snapshots = {} }) {
+    for (const [path, def] of Object.entries(systems)) { if (this.systems[path]) continue; if (def && !def._path) Object.defineProperty(def, '_path', { value: path }); this.systems[path] = def; }
+    for (const [path, info] of Object.entries(textures)) this.textures[path] ||= info;
+    for (const [path, data] of Object.entries(snapshots)) this.snapshots[path] ||= data;
+  }
   // Colour textures are read as sRGB, except for mod2x: its «modulate» textures are 50 % grey where
   // they leave the picture alone, which as sRGB would be 21 % linear and darken the whole square.
   texture(r) {
@@ -941,7 +961,7 @@ export class Library {
       default: this.unsupported.add(r._class); return null;
     }
   }
-  snapshot(path) { const data = this.snapshots[path]; return data?.position?.length ? new Snapshot(data, null) : null; }
+  snapshot(path) { const data = this.snapshots[this.aliases.get(path) ?? path]; return data?.position?.length ? new Snapshot(data, null) : null; }
   dispose() { this.group.traverse((o) => { o.geometry?.dispose(); o.material?.dispose(); }); for (const { texture } of this.cache.values()) texture?.dispose(); }
 }
 

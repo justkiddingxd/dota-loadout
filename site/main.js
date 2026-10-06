@@ -3,7 +3,7 @@ import { HeroViewer } from '../src/index.js';
 const T = {
   ru: {
     search: 'Найти героя', attrs: { str: 'Сила', agi: 'Ловкость', int: 'Интеллект', all: 'Универсал' }, short: { str: 'STR', agi: 'AGI', int: 'INT', all: 'UNI' },
-    animations: 'Анимации', reset: 'Сброс', embed: 'Встроить', copy: 'Копировать', copied: 'Скопировано',
+    animations: 'Анимации', items: 'Предметы', sets: 'Сеты', defaultItem: 'Стандартный', findItem: 'Найти предмет', style: 'Стиль', allDefault: 'Всё стандартное', noItems: 'Ничего не нашлось', reset: 'Сброс', embed: 'Встроить', copy: 'Копировать', copied: 'Скопировано',
     loading: 'Загрузка', failed: 'Не удалось загрузить героя', nothing: 'Никого не нашлось',
     hint: 'Тяни, чтобы повернуть  ·  колесо — ближе / дальше', hintTouch: 'Тяни, чтобы повернуть',
     colophon: 'Герои Dota 2 прямо в браузере: игровой шейдер, анимации и эффекты частиц. Код открыт под MIT, модели и текстуры принадлежат Valve.',
@@ -14,7 +14,7 @@ const T = {
   },
   en: {
     search: 'Find a hero', attrs: { str: 'Strength', agi: 'Agility', int: 'Intelligence', all: 'Universal' }, short: { str: 'STR', agi: 'AGI', int: 'INT', all: 'UNI' },
-    animations: 'Animations', reset: 'Reset', embed: 'Embed', copy: 'Copy', copied: 'Copied',
+    animations: 'Animations', items: 'Items', sets: 'Sets', defaultItem: 'Default', findItem: 'Find an item', style: 'Style', allDefault: 'All default', noItems: 'Nothing found', reset: 'Reset', embed: 'Embed', copy: 'Copy', copied: 'Copied',
     loading: 'Loading', failed: 'Could not load the hero', nothing: 'Nobody by that name',
     hint: 'Drag to turn  ·  wheel to zoom', hintTouch: 'Drag to turn',
     colophon: 'Dota 2 heroes live in the browser: the game’s hero shader, animations and particle effects. The code is MIT; models and textures belong to Valve.',
@@ -31,7 +31,7 @@ const stored = (() => { try { return localStorage.getItem('loadout-lang'); } cat
 let lang = stored || (/^(ru|uk|be|kk)/i.test(navigator.language) ? 'ru' : 'en');
 const t = () => T[lang];
 
-const state = { index: null, heroes: [], current: null, filter: new Set(), query: '', active: null, playing: null };
+const state = { index: null, heroes: [], current: null, filter: new Set(), query: '', active: null, playing: null, catalog: null, worn: {}, drawer: null, itemQuery: '' };
 
 // ---------------------------------------------------------------- viewer
 const canvas = $('[data-view]');
@@ -55,7 +55,7 @@ function applyTexts() {
     const b = el('button', { type: 'button', textContent: t().short[a], title: t().attrs[a] }); b.style.setProperty('--c', `var(--${a})`);
     b.setAttribute('aria-pressed', state.filter.has(a)); b.onclick = () => { state.filter.has(a) ? state.filter.delete(a) : state.filter.add(a); applyTexts(); renderList(); }; return b;
   }));
-  if (state.index) { $('[data-build]').textContent = `${t().build} ${state.index.game ?? '—'}`; renderList(); if (state.current) renderHero(state.current); }
+  if (state.index) { $('[data-build]').textContent = `${t().build} ${state.index.game ?? '—'}`; renderList(); if (state.current) renderHero(state.current); renderRail(); if (state.drawer) renderDrawer(); }
 }
 
 // ---------------------------------------------------------------- roster
@@ -149,6 +149,8 @@ async function open(id) {
   if (!h || state.current?.id === h.id) return;
   const ticket = ++loads;
   state.current = h; state.active = null; cancelAnimationFrame(state.playing);
+  state.catalog = null; state.worn = {}; closeDrawer(); renderRail();
+  const catalog = fetch(`heroes/${h.id}/items.json`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
   renderHero(h); ghost(nameOf(h).toUpperCase());
   const status = $('[data-status]'); status.hidden = false; status.classList.remove('error'); $('[data-bar]').style.width = '0';
   $('[data-status-text]').textContent = `${t().loading} · ${(h.size / 1048576).toFixed(1)} MB`;
@@ -158,11 +160,90 @@ async function open(id) {
     status.hidden = true;
     const manifestIdle = idleOf(h);
     mark(manifestIdle);
+    state.catalog = await catalog; if (ticket !== loads) return;
+    renderRail(); dress(parseHash().worn);
   } catch (e) {
     if (ticket !== loads) return;
     status.classList.add('error'); $('[data-status-text]').textContent = t().failed; console.error(e);
   }
 }
+
+// ---------------------------------------------------------------- wardrobe
+// The address keeps the hero and what he wears: #juggernaut/weapon=6058.1,head=7413 (item.style).
+function parseHash() {
+  const [id, rest = ''] = decodeURIComponent(location.hash.slice(1)).split('/'), worn = {};
+  for (const part of rest.split(',')) { const m = /^(\w+)=(\d+)(?:\.(\d+))?$/.exec(part); if (m) worn[m[1]] = [+m[2], +(m[3] || 0)]; }
+  return { id, worn };
+}
+function writeHash() {
+  const parts = Object.entries(state.worn).filter(([, w]) => w).map(([slot, [id, style]]) => `${slot}=${id}${style ? `.${style}` : ''}`);
+  history.replaceState(null, '', `#${state.current.id}${parts.length ? `/${parts.join(',')}` : ''}`);
+}
+const RARITY = { common: '#b0c3d9', uncommon: '#5e98d9', rare: '#4b69ff', mythical: '#8847ff', legendary: '#d32ce6', immortal: '#e4ae39', arcana: '#ade55c', ancient: '#eb4b4b', seasonal: '#fff34f' };
+const itemName = (it) => it.name[lang] || it.name.en;
+const iconOf = (id, style = 0) => { const it = state.catalog?.items[id], s = it?.styles[style] || it?.styles[0]; return s?.icon ? `items/${id}/${s.icon}` : null; };
+const defaultOf = (slot) => state.catalog.slots.find((s) => s.name === slot)?.items.find((id) => state.catalog.items[id].default) ?? null;
+const shownIn = (slot) => state.worn[slot]?.[0] ?? defaultOf(slot);
+
+// Puts an item on (null or a default: the hero's own) and remembers it in the address.
+async function wear(slot, id, style = 0) {
+  const it = id && state.catalog?.items[id];
+  state.worn[slot] = it && !it.default ? [+id, style] : null;
+  writeHash(); renderRail(); if (state.drawer) renderDrawer();
+  await viewer.wear(slot, state.worn[slot] ? `items/${id}/` : null, style).catch((e) => console.error(e));
+}
+// What the address asks for, on the slots it names; the others go back to their defaults.
+function dress(worn) {
+  if (!state.catalog) return;
+  for (const s of state.catalog.slots) {
+    const want = worn[s.name] && state.catalog.items[worn[s.name][0]] ? worn[s.name] : null, now = state.worn[s.name] || null;
+    if (JSON.stringify(want) !== JSON.stringify(now)) wear(s.name, want?.[0] ?? null, want?.[1] ?? 0);
+  }
+}
+function renderRail() {
+  const rail = $('[data-rail]'), c = state.catalog;
+  rail.hidden = !c?.slots.length; if (!c) return rail.replaceChildren();
+  const buttons = c.slots.map((s) => {
+    const id = shownIn(s.name), icon = id && iconOf(id, state.worn[s.name]?.[1]), b = el('button', { type: 'button', title: s.text[lang] || s.text.en }, el('span', { textContent: s.text[lang] || s.text.en }));
+    if (icon) b.style.backgroundImage = `url("${icon}")`;
+    b.classList.toggle('changed', !!state.worn[s.name]); b.setAttribute('aria-expanded', state.drawer === s.name);
+    b.onclick = () => (state.drawer === s.name ? closeDrawer() : openDrawer(s.name)); return b;
+  });
+  if (c.sets.length) { const b = el('button', { type: 'button', className: 'sets', textContent: t().sets }); b.setAttribute('aria-expanded', state.drawer === '#sets'); b.onclick = () => (state.drawer === '#sets' ? closeDrawer() : openDrawer('#sets')); buttons.push(b); }
+  rail.replaceChildren(...buttons);
+}
+function openDrawer(which) { state.drawer = which; state.itemQuery = ''; $('[data-item-search]').value = ''; $('[data-drawer]').hidden = false; renderDrawer(); renderRail(); }
+function closeDrawer() { state.drawer = null; $('[data-drawer]').hidden = true; renderRail(); }
+function tile(id, pressed, onclick, label) {
+  const it = state.catalog.items[id], icon = id && iconOf(id), b = el('button', { type: 'button', className: 'tile', title: label }, icon ? el('img', { src: icon, alt: '', loading: 'lazy' }) : el('i', { className: 'blank' }), el('b', { textContent: label }));
+  if (it) b.style.setProperty('--r', RARITY[it.rarity] || 'var(--line-2)'); b.setAttribute('aria-pressed', pressed); b.onclick = onclick; return b;
+}
+function renderDrawer() {
+  const c = state.catalog, which = state.drawer, q = state.itemQuery.trim().toLowerCase(), body = $('[data-drawer-body]'), styles = $('[data-styles]');
+  if (!c || !which) return;
+  $('[data-item-search]').placeholder = t().findItem;
+  if (which === '#sets') {
+    $('[data-drawer-title]').textContent = t().sets; styles.hidden = true;
+    const sets = c.sets.filter((s) => !q || (s.name?.[lang] || s.name?.en || s.key).toLowerCase().includes(q));
+    const reset = el('button', { type: 'button', className: 'set' }, el('b', { textContent: t().allDefault })); reset.onclick = () => { for (const s of c.slots) if (state.worn[s.name]) wear(s.name, null); };
+    body.replaceChildren(reset, ...sets.map((s) => {
+      const b = el('button', { type: 'button', className: 'set' }, el('b', { textContent: s.name?.[lang] || s.name?.en || s.key }), el('span', { className: 'icons' }, ...s.items.map((id) => el('img', { src: iconOf(id) || '', alt: '', loading: 'lazy' }))));
+      b.onclick = () => { for (const id of s.items) wear(c.items[id].slot, id); }; return b;
+    }));
+    return;
+  }
+  const slot = c.slots.find((s) => s.name === which), current = shownIn(which);
+  $('[data-drawer-title]').textContent = slot.text[lang] || slot.text.en;
+  const ids = slot.items.filter((id) => !q || itemName(c.items[id]).toLowerCase().includes(q));
+  body.replaceChildren(ids.length ? el('div', { className: 'tiles' }, ...ids.map((id) => tile(id, id === current, () => wear(which, id), c.items[id].default ? `${t().defaultItem} · ${itemName(c.items[id])}` : itemName(c.items[id])))) : el('p', { className: 'empty-items', textContent: t().noItems }));
+  // The styles of what the slot wears.
+  const it = c.items[current], style = state.worn[which]?.[1] || 0;
+  styles.hidden = !(it && it.styles.length > 1);
+  if (!styles.hidden) styles.replaceChildren(el('span', { textContent: t().style }), ...it.styles.map((s, i) => { const b = el('button', { type: 'button', textContent: s.name?.[lang] || s.name?.en || String(i + 1) }); b.setAttribute('aria-pressed', i === style); b.onclick = () => wear(which, current, i); return b; }));
+}
+$('[data-drawer-close]').onclick = closeDrawer;
+$('[data-item-search]').addEventListener('input', (e) => { state.itemQuery = e.target.value; renderDrawer(); });
+$('[data-item-search]').addEventListener('keydown', (e) => { if (e.key === 'Escape') closeDrawer(); });
 
 // ---------------------------------------------------------------- controls
 $('[data-lang-toggle]').onclick = () => { lang = lang === 'ru' ? 'en' : 'ru'; try { localStorage.setItem('loadout-lang', lang); } catch { /* private mode */ } applyTexts(); if (state.current) ghost(nameOf(state.current).toUpperCase()); };
@@ -183,7 +264,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'ArrowLeft') viewer.rotate(-0.6, { relative: true });
   if (e.key === 'ArrowRight') viewer.rotate(0.6, { relative: true });
 });
-window.addEventListener('hashchange', () => open(location.hash.slice(1)));
+window.addEventListener('hashchange', () => { const { id, worn } = parseHash(); if (id === state.current?.id) dress(worn); else open(id); });
 
 const dialog = $('[data-embed-dialog]');
 $('[data-embed]').onclick = () => {
@@ -216,7 +297,7 @@ applyTexts();
 try {
   const response = await fetch('heroes/index.json'); state.index = await response.json(); state.heroes = state.index.heroes;
   applyTexts();
-  await open(location.hash.slice(1) || 'nevermore');
+  await open(parseHash().id || 'nevermore');
   document.querySelector('.hero-link[aria-current="true"]')?.scrollIntoView({ block: 'center' });
 } catch (e) {
   $('[data-status-text]').textContent = t().failed; $('[data-status]').classList.add('error'); console.error(e);

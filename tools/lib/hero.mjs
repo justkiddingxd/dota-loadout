@@ -54,11 +54,48 @@ export async function buildHero({ game, cli, hero, out, temp, log = () => {} }) 
   }
   for (const m of Object.values(propModels)) MODELS[m.name] = Object.keys(propModels).find((k) => propModels[k] === m);
   const isProp = (name) => /^prop\d+$/.test(name);
+  const events = particleEvents(heroDump, wanted).filter((e) => has(`${e.system}.vpcf`));
 
+  const bundle = await buildBundle({ game, cli, out, temp, log, MODELS, kind: (name) => (name === 'hero' || name === 'pedestal' ? name : isProp(name) ? 'prop' : 'worn'), effects: [...hero.effects.map((e) => e.system), ...events.map((e) => e.system)],
+    animations: (name) => (isProp(name) ? [...Object.values(propModels).find((m) => m.name === name).clips] : name === 'hero' ? wanted : null) });
+  const { modelFiles, fxFiles, fxModels, materials, systems, textures, snapshots, attachments } = bundle;
+  // Props are not worn: they leave the models list for one of their own.
+  const propFiles = {};
+  for (const name of Object.keys(modelFiles).filter(isProp)) { propFiles[name] = modelFiles[name]; delete modelFiles[name]; }
+  if (!modelFiles.hero) throw new Error(`${hero.model} not exported`);
+  const effects = hero.effects.filter((e) => modelFiles[e.owner] || e.owner === 'hero');
+
+  const manifest = {
+    version: 1, id: hero.id, name: hero.name, models: modelFiles,
+    props: props.map((p) => ({ file: propFiles[propModels[p.model].name], sequence: p.sequence, frame: p.frame, clip: p.clip, loop: p.loop, attachment: p.attachment, parent: p.parent })).filter((p) => p.file),
+    animations: { idle: animations.idle, entry: animations.entry, list: animations.list }, materials, lighting: hero.lighting,
+    effects: effects.filter((e) => systems[e.system]).map((e) => ({ system: e.system, owner: modelFiles[e.owner] ? e.owner : 'hero' })),
+    events: events.filter((e) => systems[e.system]),
+    fxModels: Object.fromEntries(Object.entries(fxModels).filter(([, fx]) => fxFiles[fx.name]).map(([path, fx]) => [path, { file: fxFiles[fx.name], clips: fx.clips }])),
+    systems, textures, snapshots, attachments,
+  };
+  writeFileSync(join(out, 'hero.json'), JSON.stringify(manifest));
+  // Last, once the snapshots were fitted to the plain models: pack the models.
+  await compressHeroModels(join(out, 'models'));
+  rmSync(temp, { recursive: true, force: true });
+  return { models: [...Object.keys(modelFiles), ...Object.keys(propFiles), ...Object.keys(fxFiles)], events: events.length, materials: Object.keys(materials).length, systems: Object.keys(systems).length, animations: animations.list.length };
+}
+
+// Models with their materials, and particle systems with their textures, snapshots and the models
+// they draw, into <out>/models, textures and fx: the part of a hero's build an item's shares.
+// MODELS: name → model path; kind(name): hero, worn, prop or pedestal; animations(name): the clips
+// to export for the hero and props; effects: particle systems; heroBones: the hero's bone names
+// (filled from the hero's model when it is among MODELS), for leaving out models that are not his;
+// extraSnapshots: particle snapshots no system names (an item's, in place of the hero's).
+export async function buildBundle({ game, cli, out, temp, log = () => {}, MODELS: models, kind, animations = () => null, effects = [], heroBones = new Set(), extraSnapshots = [] }) {
+  const gameinfo = join(game, 'gameinfo.gi');
+  const has = (path) => existsSync(join(game, `${path}_c`));
+  const run = async (args) => (await exec(cli, args, { encoding: 'utf8', maxBuffer: 1 << 30 })).stdout;
+  const decompile = async (path, target) => { mkdirSync(dirname(target), { recursive: true }); await run(['-i', join(game, `${path}_c`), '--game', gameinfo, '-d', '-o', target]); };
+  const MODELS = { ...models };
   // Particle effects: the items' ambient ones and those the animations start by their events. The
   // systems are read first: the models their C_OP_RenderModels draw (Arc Warden's taunt cane and hat)
   // are exported with the hero's, each with the clip of the activity the renderer plays.
-  const events = particleEvents(heroDump, wanted).filter((e) => has(`${e.system}.vpcf`));
   const systems = {}, textureSet = new Set(), snapshotSet = new Set();
   const collect = (o) => { if (Array.isArray(o)) o.forEach(collect); else if (o && typeof o === 'object') Object.values(o).forEach(collect); else if (typeof o === 'string') { if (o.endsWith('.vtex')) textureSet.add(o); if (o.endsWith('.vsnap')) snapshotSet.add(o); } };
   const loadSystem = async (path) => {
@@ -68,8 +105,8 @@ export async function buildHero({ game, cli, hero, out, temp, log = () => {} }) 
     collect(systems[key]);
     for (const child of systems[key].m_Children || []) if (child.m_ChildRef) await loadSystem(child.m_ChildRef);
   };
-  for (const e of hero.effects) await loadSystem(e.system);
-  for (const e of events) await loadSystem(e.system);
+  for (const system of effects) await loadSystem(system);
+  for (const path of extraSnapshots) snapshotSet.add(path);
   const fxModels = {};
   for (const def of Object.values(systems)) for (const r of def.m_Renderers || []) {
     if (r._class !== 'C_OP_RenderModels' || r.m_bDisableOperator) continue;
@@ -99,16 +136,16 @@ export async function buildHero({ game, cli, hero, out, temp, log = () => {} }) 
     return refs;
   };
 
-  const materials = {}, modelFiles = {}, heroBones = new Set();
+  const materials = {}, modelFiles = {};
   for (const [name, path] of Object.entries(MODELS)) {
     const dir = join(temp, 'glb', name), file = join(dir, `${name}.glb`); mkdirSync(dir, { recursive: true });
     const args = ['-i', join(game, `${path}_c`), '--game', gameinfo, '-o', file, '-d', '--gltf_export_format', 'glb', '--gltf_export_materials', '--gltf_textures_adapt'];
     // The skeleton only comes with animations exported; items take the hero's, so only the hero keeps clips.
     // Models drawn by particles keep all their clips (they are small): which one an effect plays is
     // the viewer's choice, by the renderer's activity.
-    const propClips = isProp(name) ? [...Object.values(propModels).find((m) => m.name === name).clips] : null;
+    const clips = kind(name) === 'hero' || kind(name) === 'prop' ? animations(name) : null;
     if (isFx(name)) args.push('--gltf_export_animations');
-    else if (name !== 'pedestal') args.push('--gltf_export_animations', '--gltf_animation_list', name === 'hero' ? wanted.join(',') : propClips?.length ? propClips.join(',') : '-');
+    else if (kind(name) !== 'pedestal') args.push('--gltf_export_animations', '--gltf_animation_list', clips?.length ? clips.join(',') : '-');
     try { await run(args); } catch (e) { log(`  ${name}: ${path} not exported (${e.message.split('\n')[0]})`); continue; }
     if (!existsSync(file)) { log(`  ${name}: ${path} not exported`); continue; }
     const { json, bin } = readGlb(file);
@@ -116,24 +153,20 @@ export async function buildHero({ game, cli, hero, out, temp, log = () => {} }) 
     // Items are bone-merged onto the hero: one that shares no bone with him is someone else (a summon, a ward).
     const bones = (json.skins || []).flatMap((s) => s.joints.map((j) => json.nodes[j].name?.toLowerCase()));
     if (name === 'hero') bones.forEach((b) => heroBones.add(b));
-    else if (name !== 'pedestal' && !isProp(name) && !isFx(name) && json.skins?.length && !bones.some((b) => heroBones.has(b))) { log(`  ${name}: ${path} shares no bone with the hero, left out`); continue; }
+    else if (kind(name) === 'worn' && !isFx(name) && json.skins?.length && !bones.some((b) => heroBones.has(b))) { log(`  ${name}: ${path} shares no bone with the hero, left out`); continue; }
     // The normal maps come adapted to glTF by the exporter; everything else is read from the material.
     for (const material of json.materials || []) {
       const normal = json.images?.[json.textures?.[material.normalTexture?.index]?.source]?.uri;
       materials[material.name] = { ...materials[material.name], normalFile: normal ? join(dir, normal) : null };
     }
     for (const m of json.materials || []) { for (const k of ['pbrMetallicRoughness', 'normalTexture', 'occlusionTexture', 'emissiveTexture']) delete m[k]; delete m.extensions; }
-    delete json.images; delete json.textures; delete json.samplers; if (name !== 'hero' && !isProp(name) && !isFx(name)) delete json.animations;
+    delete json.images; delete json.textures; delete json.samplers; if (kind(name) !== 'hero' && kind(name) !== 'prop' && !isFx(name)) delete json.animations;
     for (const n of json.nodes || []) if (n.name?.includes('/')) n.name = basename(n.name).replace(/\.vmdl_c.*/, '');
     for (const m of json.meshes || []) if (m.name?.includes('/')) m.name = basename(m.name);
     writeGlb(join(out, 'models', `${name}.glb`), json, compact(json, bin));
     modelFiles[name] = `models/${name}.glb`;
     for (const ref of references(path)) if (ref.endsWith('.vmat')) materials[basename(ref, '.vmat')] = { ...materials[basename(ref, '.vmat')], vmat: ref };
   }
-  if (!modelFiles.hero) throw new Error(`${hero.model} not exported`);
-  // Props are not worn: they leave the models list for one of their own.
-  const propFiles = {};
-  for (const name of Object.keys(modelFiles).filter(isProp)) { propFiles[name] = modelFiles[name]; delete modelFiles[name]; }
   const fxFiles = {};
   for (const name of Object.keys(modelFiles).filter(isFx)) { fxFiles[name] = modelFiles[name]; delete modelFiles[name]; }
 
@@ -222,8 +255,6 @@ export async function buildHero({ game, cli, hero, out, temp, log = () => {} }) 
   }
 
   // ---------------------------------------------------------------- effects
-  const effects = hero.effects.filter((e) => modelFiles[e.owner] || e.owner === 'hero').filter((e) => systems[e.system]);
-
   // Particle textures; sprite sheets come out of the CLI as frames cropped to their content, put back
   // at their own rectangles so the sheet's UVs are Valve's.
   const textures = {};
@@ -280,7 +311,7 @@ export async function buildHero({ game, cli, hero, out, temp, log = () => {} }) 
     const floats = (json, bin, index) => { const a = json.accessors[index], v = json.bufferViews[a.bufferView], k = { SCALAR: 1, VEC3: 3, VEC4: 4, MAT4: 16 }[a.type], start = (v.byteOffset || 0) + (a.byteOffset || 0);
       return new Float32Array(bin.buffer.slice(bin.byteOffset + start, bin.byteOffset + start + a.count * k * 4)); };
     const vertices = [], frames = new Map();
-    for (const name of Object.keys(modelFiles).filter((k) => k !== 'pedestal')) {
+    for (const name of Object.keys(modelFiles).filter((k) => kind(k) === 'hero' || kind(k) === 'worn')) {
       const { json, bin } = readGlb(join(out, modelFiles[name]));
       for (const mesh of json.meshes || []) for (const p of mesh.primitives) { const f = floats(json, bin, p.attributes.POSITION), step = Math.max(1, Math.floor(f.length / 3 / 4000)) * 3; for (let i = 0; i < f.length; i += step) vertices.push(new Vector3(f[i], f[i + 1], f[i + 2]).applyMatrix4(G2S)); }
       for (const skin of json.skins || []) { const ibm = floats(json, bin, skin.inverseBindMatrices);
@@ -297,7 +328,7 @@ export async function buildHero({ game, cli, hero, out, temp, log = () => {} }) 
 
   // Attachments of every model (bone, offset in inches and rotation in the bone's space).
   const attachments = {};
-  for (const name of Object.keys(modelFiles)) {
+  for (const name of Object.keys(modelFiles).filter((k) => kind(k) !== 'prop')) {
     const text = await run(['-i', join(game, `${MODELS[name]}_c`), '-a']), list = {};
     for (const m of text.matchAll(/m_attachments =\s*\[/g)) {
       let depth = 0, end = m.index + m[0].length - 1;
@@ -312,18 +343,5 @@ export async function buildHero({ game, cli, hero, out, temp, log = () => {} }) 
     attachments[name] = list;
   }
 
-  const manifest = {
-    version: 1, id: hero.id, name: hero.name, models: modelFiles,
-    props: props.map((p) => ({ file: propFiles[propModels[p.model].name], sequence: p.sequence, frame: p.frame, clip: p.clip, loop: p.loop, attachment: p.attachment, parent: p.parent })).filter((p) => p.file),
-    animations: { idle: animations.idle, entry: animations.entry, list: animations.list }, materials, lighting: hero.lighting,
-    effects: effects.filter((e) => systems[e.system]).map((e) => ({ system: e.system, owner: modelFiles[e.owner] ? e.owner : 'hero' })),
-    events: events.filter((e) => systems[e.system]),
-    fxModels: Object.fromEntries(Object.entries(fxModels).filter(([, fx]) => fxFiles[fx.name]).map(([path, fx]) => [path, { file: fxFiles[fx.name], clips: fx.clips }])),
-    systems, textures, snapshots, attachments,
-  };
-  writeFileSync(join(out, 'hero.json'), JSON.stringify(manifest));
-  // Last, once the snapshots were fitted to the plain models: pack the models.
-  await compressHeroModels(join(out, 'models'));
-  rmSync(temp, { recursive: true, force: true });
-  return { models: [...Object.keys(modelFiles), ...Object.keys(propFiles), ...Object.keys(fxFiles)], events: events.length, materials: Object.keys(materials).length, systems: Object.keys(systems).length, animations: animations.list.length };
+  return { modelFiles, fxFiles, fxModels, materials, systems, textures, snapshots, attachments };
 }

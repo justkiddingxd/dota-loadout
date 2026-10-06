@@ -83,6 +83,16 @@ void main() {
     this.fit();
     return { name: manifest.name, animations: hero.animations };
   }
+  // Dresses the hero: an item folder's address (with item.json inside), or { manifest, url } for
+  // bundlers, on one of his slots in one of its styles; null puts the slot's default back.
+  async wear(slot, source, style = 0) {
+    const hero = this.hero; if (!hero) return;
+    const tickets = (this.wearing ||= {}), ticket = (tickets[slot] = (tickets[slot] || 0) + 1);
+    const current = () => hero === this.hero && ticket === tickets[slot];
+    const item = typeof source === 'string' ? await fetchJson(source, 'item.json') : source;
+    if (current()) await hero.wear(slot, item, style, current);
+  }
+  get worn() { return this.hero?.worn || {}; }
   unload() { if (!this.hero) return; this.scene.remove(this.hero.lib.group, this.hero.turntable); this.hero.dispose(); this.hero = null; }
 
   get animations() { return this.hero?.animations || []; }
@@ -169,16 +179,17 @@ void main() {
   }
 }
 
-async function fetchHero(base) {
+async function fetchJson(base, file) {
   const root = base.endsWith('/') ? base : `${base}/`, href = new URL(root, globalThis.location?.href).href;
-  const response = await fetch(`${href}hero.json`); if (!response.ok) throw new Error(`${href}hero.json: ${response.status}`);
+  const response = await fetch(`${href}${file}`); if (!response.ok) throw new Error(`${href}${file}: ${response.status}`);
   return { manifest: await response.json(), url: (path) => href + path };
 }
+const fetchHero = (base) => fetchJson(base, 'hero.json');
 
 // ---------------------------------------------------------------- one hero
 async function buildHero(manifest, url, manager, time, light) {
-  const textures = new THREE.TextureLoader(manager), made = [];
-  const texture = (file, srgb = false) => { const t = textures.load(url(`textures/${file}`)); t.flipY = false; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace; t.anisotropy = 4; made.push(t); return t; };
+  const made = [], textureOf = (loader, address) => (file, srgb = false) => { const t = loader.load(address(`textures/${file}`)); t.flipY = false; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace; t.anisotropy = 4; made.push(t); return t; };
+  const texture = textureOf(new THREE.TextureLoader(manager), url);
   // The models are packed with EXT_meshopt_compression (tools/compress.mjs).
   const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
   const names = Object.keys(manifest.models), loaded = Object.fromEntries(await Promise.all(names.map(async (k) => [k, await loader.loadAsync(url(manifest.models[k]))])));
@@ -187,28 +198,34 @@ async function buildHero(manifest, url, manager, time, light) {
   const heroModel = loaded.hero, root = heroModel.scene, bones = {}, inverses = {};
 
   // Items follow the hero's skeleton by bone name, as the game bone-merges them; an item's own
-  // extra bones hang under the hero bone that is their parent.
+  // extra bones hang under the hero bone that is their parent. What a slot wears is a set of meshes
+  // and such bones, put on and taken off whole (the defaults are kept for when they come back).
   root.traverse((o) => { if (o.isBone) bones[o.name.toLowerCase()] = o; if (o.isSkinnedMesh) o.skeleton.bones.forEach((b, i) => { inverses[b.name.toLowerCase()] ||= o.skeleton.boneInverses[i]; }); });
-  const items = names.filter((k) => k !== 'hero' && k !== 'pedestal');
-  for (const name of items) {
-    const item = loaded[name].scene, meshes = [], rigid = [];
-    item.traverse((o) => { if (o.isSkinnedMesh) meshes.push(o); else if (o.isMesh) rigid.push(o); });
-    for (const mesh of meshes) {
-      const mapped = mesh.skeleton.bones.map((b) => { const own = bones[b.name.toLowerCase()]; if (own) return own; const parent = b.parent && bones[b.parent.name.toLowerCase()]; if (parent) parent.add(b); return b; });
+  const fit = (scene) => {
+    const skinned = [], rigid = [], extra = [];
+    scene.traverse((o) => { if (o.isSkinnedMesh) skinned.push(o); else if (o.isMesh) rigid.push(o); });
+    for (const mesh of skinned) {
+      const mapped = mesh.skeleton.bones.map((b, i) => { const own = bones[b.name.toLowerCase()]; if (own) return own; const parent = b.parent && bones[b.parent.name.toLowerCase()];
+        if (parent && !extra.some((x) => x.bone === b)) extra.push({ bone: b, parent, key: b.name.toLowerCase(), inverse: mesh.skeleton.boneInverses[i] }); return b; });
       mesh.skeleton.bones.forEach((b, i) => { const k = b.name.toLowerCase(); inverses[k] ||= mesh.skeleton.boneInverses[i]; bones[k] ||= mapped[i]; });
-      mesh.bind(new THREE.Skeleton(mapped, mesh.skeleton.boneInverses), mesh.bindMatrix); root.add(mesh);
+      mesh.bind(new THREE.Skeleton(mapped, mesh.skeleton.boneInverses), mesh.bindMatrix);
     }
     // Unskinned items stay as they are, beside the hero.
-    for (const mesh of rigid) root.add(mesh);
-  }
+    return { meshes: [...skinned, ...rigid], extra };
+  };
+  const putOn = (w) => { for (const x of w.extra) { x.parent.add(x.bone); bones[x.key] = x.bone; inverses[x.key] = x.inverse; } for (const m of w.meshes) root.add(m); };
+  const takeOff = (w) => { for (const m of w.meshes) root.remove(m); for (const x of w.extra) { x.bone.parent?.remove(x.bone); if (bones[x.key] === x.bone) delete bones[x.key]; if (inverses[x.key] === x.inverse) delete inverses[x.key]; } };
+  const items = names.filter((k) => k !== 'hero' && k !== 'pedestal'), defaults = new Map(), worn = new Map(), wearing = new Map();
+  for (const name of items) { const w = fit(loaded[name].scene); defaults.set(name, w); worn.set(name, { ...w, item: null }); putOn(w); }
   const turntable = new THREE.Group(); turntable.add(root); if (loaded.pedestal) turntable.add(loaded.pedestal.scene);
   const materials = new Map();
-  const dress = (group) => group.traverse((o) => {
+  // An item's materials come with it, their textures from its folder: keyed by both.
+  const dress = (group, mats = manifest.materials, tex = texture, base = '') => group.traverse((o) => {
     if (!o.isMesh) return; o.frustumCulled = false; o.castShadow = o.receiveShadow = true;
     // A mesh whose material did not come with the hero (an additive glow, a motion smear) is hidden
     // rather than drawn plain white.
-    const key = o.material.name, m = manifest.materials[key]; if (!m) { o.visible = false; return; }
-    if (!materials.has(key)) materials.set(key, heroMaterial(m, texture, time, light)); o.material.dispose(); o.material = materials.get(key);
+    const key = o.material.name, m = mats[key]; if (!m) { o.visible = false; return; }
+    if (!materials.has(base + key)) materials.set(base + key, heroMaterial(m, tex, time, light)); o.material.dispose(); o.material = materials.get(base + key);
   });
   dress(turntable);
 
@@ -260,9 +277,12 @@ async function buildHero(manifest, url, manager, time, light) {
       return { scene, clip };
     },
   };
-  const lib = new Library({ systems: manifest.systems || {}, textures: manifest.textures || {}, snapshots: manifest.snapshots || {}, url: (file) => url(`fx/${file}`), models: fxModels });
+  // Items' particle textures come with full addresses.
+  const lib = new Library({ systems: manifest.systems || {}, textures: manifest.textures || {}, snapshots: manifest.snapshots || {}, url: (file) => (/^[a-z]+:/.test(file) ? file : url(`fx/${file}`)), models: fxModels });
   lib.loader.manager = manager;
-  const attachment = (name, owner) => { for (const model of [owner, 'hero', ...items]) { const at = manifest.attachments?.[model]?.[name]; if (at) return at; } return null; };
+  // Attachments by model: the hero's, and those of what each slot wears.
+  const attachments = { ...manifest.attachments };
+  const attachment = (name, owner) => { for (const model of [owner, 'hero', ...worn.keys()]) { const at = attachments[model]?.[name]; if (at) return at; } return null; };
   const attachmentMatrix = (at) => { const bone = bones[at.bones[0].toLowerCase()]; if (!bone) return null;
     return toSource(bone.matrixWorld.clone().multiply(new THREE.Matrix4().compose(new THREE.Vector3(...at.offsets[0]).multiplyScalar(0.0254), new THREE.Quaternion(...at.rotations[0]), new THREE.Vector3(1, 1, 1)))); };
   const model = {
@@ -313,13 +333,28 @@ async function buildHero(manifest, url, manager, time, light) {
     const cps = e.sim.cps; cps.clear(); cps.set(0, cpOf(origin));
     for (const d of e.drivers) cps.set(d.cp, e.fixed.get(d.cp) || placeCP(d, e.owner, origin));
   };
-  const effects = (manifest.effects || []).map((e) => { const def = manifest.systems?.[e.system]; return def ? instance(def, e.owner, driversFor(def, null)) : null; }).filter(Boolean);
+  // The ambient effects: the hero's own and his items' — a slot's default ones only while it wears
+  // its default. Worn items may put their own effects and snapshots in place of the hero's.
+  let effects = [];
+  const replaced = new Map();
+  const ambient = () => {
+    for (const e of effects) e.sim.dispose();
+    replaced.clear(); lib.aliases.clear();
+    const list = (manifest.effects || []).filter((e) => !worn.get(e.owner)?.item);
+    for (const [slot, w] of worn) if (w.item) {
+      for (const system of w.style.effects) list.push({ system, owner: slot });
+      for (const [from, to] of Object.entries(w.style.particles)) replaced.set(from, to);
+      for (const [from, to] of Object.entries(w.style.snapshots)) lib.aliases.set(from, to);
+    }
+    effects = list.map((e) => { const def = lib.system(replaced.get(e.system) ?? e.system); return def ? instance(def, e.owner, driversFor(def, null)) : null; }).filter(Boolean);
+  };
+  ambient();
 
   // Effects the animations start and stop by their events, at their moments in the animation.
   const events = manifest.events || [], live = [];
   const fire = (ev) => {
     if (ev.stop) { for (const e of live) if (e.system === ev.system) { e.sim.stopEmission(); if (ev.instantly) e.kill = true; } return; }
-    const def = manifest.systems?.[ev.system]; if (!def) return;
+    const def = lib.system(replaced.get(ev.system) ?? ev.system); if (!def) return;
     // Events give attach types in short (point_follow) or as the game's names (PATTACH_POINT_FOLLOW).
     const attachType = (type, att) => (type ? (/^PATTACH_/.test(type) ? type : `PATTACH_${type.toUpperCase()}`) : att ? 'PATTACH_POINT_FOLLOW' : 'PATTACH_ABSORIGIN_FOLLOW');
     const drivers = ev.points ? ev.points.map(([att, type], cp) => att || cp === 0 ? { cp, type: attachType(type, att), attachment: att, offset: null } : null).filter(Boolean) : driversFor(def, ev.config);
@@ -344,7 +379,7 @@ async function buildHero(manifest, url, manager, time, light) {
     lastTime = now;
   };
   return {
-    turntable, lib, box, heroBox, effects, live, animations: list.map((x) => ({ ...x, loop: loops.has(x.name), duration: clips.get(x.name).duration })),
+    turntable, lib, box, heroBox, live, get effects() { return effects; }, animations: list.map((x) => ({ ...x, loop: loops.has(x.name), duration: clips.get(x.name).duration })),
     play: (name) => start(name),
     update(dt, camera) {
       mixer.update(dt);
@@ -369,8 +404,39 @@ async function buildHero(manifest, url, manager, time, light) {
       for (const [mesh, i] of samples) { mesh.getVertexPosition(i, point).applyMatrix4(mesh.matrixWorld).project(camera); s.expandByPoint(new THREE.Vector2(point.x, point.y)); }
       return s.expandByVector(s.getSize(new THREE.Vector2()).multiplyScalar(0.03));
     },
+    // What each slot wears: its item's id and style, or null for its default.
+    get worn() { return Object.fromEntries([...worn].map(([slot, w]) => [slot, w.item ? { id: w.item, style: w.styleIndex } : null])); },
+    // Puts an item on a slot — source: { manifest, url(path) } of an item folder, with the style's
+    // index — or the slot's default back (source null). Resolves once it is on, textures loaded.
+    async wear(slot, source, style = 0, current = () => true) {
+      let record = defaults.get(slot) || { meshes: [], extra: [] }, m = null, s = null, key = null;
+      if (source) {
+        m = source.manifest; s = m.styles[style] || m.styles[0]; key = `${source.url('')}#${m.styles.indexOf(s)}`;
+        record = wearing.get(key);
+        if (!record) {
+          const itemManager = new THREE.LoadingManager(), tex = textureOf(new THREE.TextureLoader(itemManager), source.url);
+          const scenes = await Promise.all(s.models.map((n) => loader.loadAsync(source.url(m.models[n]))));
+          for (const [path, info] of Object.entries(m.fxModels || {})) { const file = source.url(info.file); propModels[file] ||= await loader.loadAsync(file); (manifest.fxModels ||= {})[path] ||= { file, clips: info.clips }; }
+          lib.add({ systems: m.systems, snapshots: m.snapshots, textures: Object.fromEntries(Object.entries(m.textures || {}).map(([k, v]) => [k, { ...v, file: source.url(`fx/${v.file}`) }])) });
+          for (const sc of scenes) dress(sc.scene, m.materials, tex, source.url(''));
+          await new Promise((done) => { if (!itemManager.itemsTotal || itemManager.itemsLoaded >= itemManager.itemsTotal) done(); else { itemManager.onLoad = done; itemManager.onError = () => {}; } });
+          record = { scenes, attachments: Object.assign({}, ...s.models.map((n) => m.attachments?.[n] || {})) };
+          wearing.set(key, record);
+        }
+      }
+      if (!current()) return;
+      // Off with the old first: the new one's extra bones must not find the old one's by name.
+      const old = worn.get(slot); if (old) takeOff(old);
+      if (record.scenes && !record.meshes) { record.meshes = []; record.extra = []; for (const sc of record.scenes) { const w = fit(sc.scene); record.meshes.push(...w.meshes); record.extra.push(...w.extra); } }
+      putOn(record);
+      worn.set(slot, { meshes: record.meshes, extra: record.extra, item: m ? m.id : null, style: s, styleIndex: m ? m.styles.indexOf(s) : 0 });
+      attachments[slot] = m ? record.attachments : manifest.attachments?.[slot];
+      ambient();
+    },
     dispose() {
       mixer.stopAllAction(); for (const p of props) p.mixer.stopAllAction(); turntable.traverse((o) => { o.geometry?.dispose(); });
+      for (const r of wearing.values()) for (const mesh of r.meshes || []) mesh.geometry?.dispose();
+      for (const w of defaults.values()) for (const mesh of w.meshes) mesh.geometry?.dispose();
       for (const m of materials.values()) m.dispose(); for (const t of made) t.dispose(); lib.dispose();
     },
   };

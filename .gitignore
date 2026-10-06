@@ -3,3 +3,5 @@ node_modules/
 dist/
 *.zip
 !tools/*.zip
+assets/items/
+assets/heroes/*/items.json

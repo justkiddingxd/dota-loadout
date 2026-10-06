@@ -91,6 +91,25 @@ The game's files never leave your machine except as the archive you make yoursel
 
 3. `npm run dev` for the site, `npm run build` to put it into `dist/`.
 
+### Cosmetics
+
+Every wearable of a hero can be put on in the viewer (`viewer.wear(slot, 'items/<id>/', style)`, or the
+site's item rail). Their files come straight from Steam, without a game install:
+
+```sh
+# once, by hand: a Steam account with Dota 2 in its library; asks for the password and the Steam Guard code
+cd .cache/steam && ./DepotDownloader -app 570 -depot 373301 -filelist files.txt -dir dl -username <login> -remember-password -no-mobile
+echo <login> > username.txt
+# then: every hero file and cosmetic (~11 GB unpacked; the ~400 archives are fetched and dropped in turn)
+node tools/fetch-dota.mjs
+npm run heroes -- --game .cache/steam/game/dota
+node tools/build-items.mjs --game .cache/steam/game/dota --cli .cache/vrf-20.0/Source2Viewer-CLI --only marci,juggernaut,pudge
+```
+
+Items go to `assets/items/<id>/` (models, materials and effects of all their styles), each hero's catalog
+to `assets/heroes/<id>/items.json`. They are not kept in git (about 250 KB an item, 10 000 items). Not
+done yet: taunts, pets, personas, arcanas and items that change animations.
+
 ### `hero.json`
 
 ```jsonc
@@ -118,4 +137,5 @@ license. Dota 2 is a trademark of Valve; this project is not affiliated with Val
 Loadout — все герои Dota 2 в браузере на three.js: игровой шейдер героя, свет со страницы героя, анимации и
 частицы. Код открыт под MIT, ассеты принадлежат Valve. Демо: https://rin.ms/d2h/. Пересобрать героев
 после патча: `tools/extract-dota.cmd` на Windows с установленной Dota, затем
-`npm run heroes -- --zip <архив>`.
+`npm run heroes -- --zip <архив>`. Косметика: `node tools/fetch-dota.mjs` качает файлы игры из Steam,
+`node tools/build-items.mjs` собирает предметы (подробности выше, в Cosmetics).

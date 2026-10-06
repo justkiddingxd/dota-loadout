@@ -21,7 +21,7 @@ function localization(game, lang) {
 
 export function loadGame(game) {
   const roster = parseKV(read(game, 'scripts/npc/npc_heroes.txt')).bases.map((b) => b.replace(/^heroes\//, '').replace(/\.txt$/, ''));
-  const items = parseKV(read(game, 'scripts/items/items_game.txt')).data.items_game.items;
+  const itemsGame = parseKV(read(game, 'scripts/items/items_game.txt')).data.items_game, items = itemsGame.items;
   const portraits = parseKV(read(game, 'scripts/npc/portraits_full_body_loadout.txt')).data.DOTAFullBodyLoadoutPortraitInfo || {};
   const loc = { en: localization(game, 'english'), ru: localization(game, 'russian') };
   const text = (key, lang) => { if (!key) return null; const k = key.replace(/^#/, '').toLowerCase(); return loc[lang][k] ?? null; };
@@ -43,7 +43,8 @@ export function loadGame(game) {
     const wearables = [], effects = [];
     // A persona's default items dress another model of the hero: they are not the hero's look.
     for (const item of (defaults[npc] || []).sort((a, b) => a.id - b.id).filter((i) => !/persona/.test(i.item_slot || ''))) {
-      const owner = item.model_player ? item.item_slot || `item${item.id}` : 'hero';
+      // An item without a slot of its own has its prefab's (a default item's: the weapon).
+      const slot = item.item_slot || itemsGame.prefabs?.[item.prefab]?.item_slot, owner = item.model_player ? slot || `item${item.id}` : 'hero';
       for (const [k, m] of Object.entries(item.visuals || {})) {
         if (!/^asset_modifier/.test(k) || typeof m !== 'object') continue;
         if ((m.type === 'particle_create' || m.type === 'particle') && /\.vpcf$/.test(m.modifier || '')) effects.push({ system: m.modifier.replace(/\.vpcf$/, ''), owner });
@@ -174,4 +175,55 @@ export function particleEvents(dump, names) {
     }
   }
   return events;
+}
+
+// The cosmetics of every hero: his loadout slots, the items for them (his defaults and every
+// wearable) with their styles, and the sets they make up. A style: the models worn (the item's own,
+// or the style's, and additional ones), the particle effects it adds, the hero's effects and
+// snapshots it replaces, its skin. What an item does that is not drawn on the hero (sounds, icons,
+// summons) is left out; what it would change and is not done yet (personas, arcanas, animations) is
+// named in `unsupported`.
+export function loadCosmetics(game) {
+  const ig = parseKV(read(game, 'scripts/items/items_game.txt')).data.items_game;
+  const loc = { en: localization(game, 'english'), ru: localization(game, 'russian') };
+  const text = (key) => { if (!key) return null; const k = key.replace(/^#/, '').toLowerCase(); const en = loc.en[k] ?? null; return en || loc.ru[k] ? { en, ru: loc.ru[k] ?? en } : null; };
+  const DRAWN = new Set(['particle_create', 'particle', 'particle_snapshot', 'additional_wearable', 'model_skin']);
+  const UNSUPPORTED = new Set(['hero_model_change', 'persona', 'activity', 'arcana_level', 'bodygroup_visibility', 'entity_scale', 'particle_combined', 'model']);
+  const byName = new Map(Object.entries(ig.items).map(([id, i]) => [i.name, +id]));
+  const setOf = new Map();
+  for (const [key, set] of Object.entries(ig.item_sets || {})) for (const name of Object.keys(set.items || {})) if (byName.has(name)) setOf.set(byName.get(name), key);
+  const heroes = new Map();
+  for (const [id, item] of Object.entries(ig.items)) {
+    if (!(item.prefab === 'default_item' || item.prefab === 'wearable') || !item.used_by_heroes || typeof item.used_by_heroes !== 'object') continue;
+    const visuals = item.visuals || {}, modifiers = Object.entries(visuals).filter(([k, m]) => /^asset_modifier/.test(k) && m && typeof m === 'object').map(([, m]) => m);
+    const styleKeys = visuals.styles ? Object.keys(visuals.styles).sort((a, b) => a - b) : [null];
+    const styles = styleKeys.map((s) => {
+      const style = s === null ? {} : visuals.styles[s], mine = modifiers.filter((m) => m.style === undefined || m.style === s);
+      const model = style.model_player || item.model_player;
+      const icon = (style.alternate_icon !== undefined && visuals.alternate_icons?.[style.alternate_icon]?.icon_path) || item.image_inventory;
+      const pairs = (type) => Object.fromEntries(mine.filter((m) => m.type === type && m.asset && m.modifier).map((m) => [m.asset.replace(/\.vpcf$/, ''), m.modifier.replace(/\.vpcf$/, '')]));
+      return {
+        name: s === null ? null : text(style.name), icon: icon ? icon.toLowerCase() : null,
+        models: [model, ...mine.filter((m) => m.type === 'additional_wearable').map((m) => m.asset)].filter((m) => m && /\.vmdl$/.test(m)),
+        effects: mine.filter((m) => m.type === 'particle_create' && /\.vpcf$/.test(m.modifier || '')).map((m) => m.modifier.replace(/\.vpcf$/, '')),
+        particles: pairs('particle'), snapshots: Object.fromEntries(mine.filter((m) => m.type === 'particle_snapshot' && m.asset && m.modifier).map((m) => [m.asset, m.modifier])),
+        skin: +(style.skin ?? mine.find((m) => m.type === 'model_skin')?.skin ?? 0),
+      };
+    });
+    const unsupported = [...new Set(modifiers.map((m) => m.type).filter((t) => UNSUPPORTED.has(t)))];
+    for (const npc of Object.keys(item.used_by_heroes)) {
+      const h = heroes.get(npc) || heroes.set(npc, { items: [] }).get(npc);
+      h.items.push({ id: +id, name: text(item.item_name) || { en: item.name, ru: item.name }, slot: item.item_slot || ig.prefabs?.[item.prefab]?.item_slot || null, rarity: item.item_rarity || ig.prefabs?.[item.prefab]?.item_rarity || 'common',
+        default: item.prefab === 'default_item', set: setOf.get(+id) || null, styles, ...(unsupported.length ? { unsupported } : {}) });
+    }
+  }
+  for (const [npc, h] of heroes) {
+    const file = `scripts/npc/heroes/${npc}.txt`;
+    const slots = existsSync(join(game, file)) ? Object.values(parseKV(read(game, file)).data.DOTAHeroes?.[npc]?.ItemSlots || {}) : [];
+    h.slots = slots.sort((a, b) => a.SlotIndex - b.SlotIndex).map((s) => ({ name: s.SlotName, text: text(s.SlotText) || { en: s.SlotName, ru: s.SlotName }, units: !!s.GeneratesUnits }));
+    const ids = new Set(h.items.map((i) => i.id));
+    h.sets = Object.entries(ig.item_sets || {}).map(([key, set]) => ({ key, name: text(set.name), items: Object.keys(set.items || {}).map((n) => byName.get(n)).filter((i) => ids.has(i)) }))
+      .filter((s) => s.items.length > 1 && h.items.some((i) => i.set === s.key));
+  }
+  return heroes;
 }
