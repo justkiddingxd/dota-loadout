@@ -3,7 +3,7 @@
 Every Dota 2 hero, rendered live in the browser with three.js — with the game's own hero shader,
 loadout lighting, animations and particle effects.
 
-**Demo:** https://rin.ms/d2h/ · **Repo:** https://github.com/justkiddingxd/dota-loadout
+**Demo:** https://loadout.nyan.cafe/ · **Repo:** https://github.com/justkiddingxd/dota-loadout
 
 - **Viewer** (`src/`) — a small ES module: `new HeroViewer(canvas)`, `await viewer.load(url)`, `viewer.play(name)`.
 - **Heroes** (`assets/heroes/`) — all heroes in their default look, ready to load: compressed glTF
@@ -141,7 +141,7 @@ license. Dota 2 is a trademark of Valve; this project is not affiliated with Val
 ### По-русски
 
 Loadout — все герои Dota 2 в браузере на three.js: игровой шейдер героя, свет со страницы героя, анимации и
-частицы. Код открыт под MIT, ассеты принадлежат Valve. Демо: https://rin.ms/d2h/. Пересобрать героев
+частицы. Код открыт под MIT, ассеты принадлежат Valve. Демо: https://loadout.nyan.cafe/. Пересобрать героев
 после патча: `tools/extract-dota.cmd` на Windows с установленной Dota, затем
 `npm run heroes -- --zip <архив>`. Косметика: `node tools/fetch-dota.mjs` качает файлы игры из Steam,
 `node tools/build-items.mjs` собирает предметы (подробности выше, в Cosmetics).
