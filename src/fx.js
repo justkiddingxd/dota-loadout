@@ -170,8 +170,8 @@ function number(d, def = 0) {
     case 'PF_TYPE_PARTICLE_FLOAT': case 'PF_TYPE_PARTICLE_INITIAL_FLOAT': { const f = field(d.m_nScalarAttribute, F.Radius); return (p) => map(p ? p.getS(f) : 0); }
     case 'PF_TYPE_PARTICLE_AGE': return (p) => map(p ? p.age : 0);
     case 'PF_TYPE_PARTICLE_AGE_NORMALIZED': return (p) => map(p ? p.nage : 0);
-    case 'PF_TYPE_COLLECTION_AGE': return (p, s) => map(s.age);
-    case 'PF_TYPE_CONTROL_POINT_COMPONENT': { const cp = d.m_nControlPoint ?? 0, c = d.m_nVectorComponent ?? 0; return (p, s) => map(s.cp(cp).pos.getComponent(Math.min(2, c))); }
+    case 'PF_TYPE_COLLECTION_AGE': return (p, s) => map(s ? s.age : 0);
+    case 'PF_TYPE_CONTROL_POINT_COMPONENT': { const cp = d.m_nControlPoint ?? 0, c = d.m_nVectorComponent ?? 0; return (p, s) => map(s ? s.cp(cp).pos.getComponent(Math.min(2, c)) : 0); }
     case 'PF_TYPE_PARTICLE_NUMBER': return (p) => map(p ? p.uid : 0);
     default: return () => d.m_flLiteralValue ?? def;
   }
@@ -523,7 +523,7 @@ Object.assign(INIT, {
   },
   C_INIT_RandomVectorComponent(d) {
     const out = field(d.m_nFieldOutput, F.Position), a = d.m_flMin ?? 0, b = d.m_flMax ?? 0, c = Math.min(2, Math.max(0, d.m_nComponent ?? 0));
-    return (p) => { const v = p.getV(out).clone(); v.setComponent(c, lerp(a, b, rnd())); p.setV(out, v); };
+    return (p) => { const v = p.getV(out).clone(); if (c >= 0 && c <= 2) v.setComponent(c, lerp(a, b, rnd())); p.setV(out, v); };
   },
   // The particle's offset from a control point, turned m_flOffsetRot degrees about m_vecOffsetAxis.
   C_INIT_RemapInitialDirectionToTransformToVector(d) {
@@ -540,16 +540,46 @@ Object.assign(INIT, {
   C_INIT_RemapInitialTransformDirectionToRotation(d) {
     const tr = transform(d.m_TransformInput, 0), out = field(d.m_nFieldOutput, F.Yaw), off = (d.m_flOffsetRot ?? 0) * Math.PI / 180, comp = Math.min(2, Math.max(0, d.m_nComponent ?? 1));
     return (p, s) => { const q = new THREE.Quaternion().setFromRotationMatrix(tr(s)), f = new THREE.Vector3(1, 0, 0).applyQuaternion(q), v = s.sim.version;
-      p.setS(out, v >= 7 ? off - eulerAngles(q).getComponent(comp) : off + Math.atan2(f.y, f.x) + (v < 4 ? Math.PI : 0)); };
+      p.setS(out, v >= 7 ? off - (comp >= 0 && comp <= 2 ? eulerAngles(q).getComponent(comp) : 0) : off + Math.atan2(f.y, f.x) + (v < 4 ? Math.PI : 0)); };
   },
   C_INIT_RemapTransformOrientationToRotations(d) { const op = OP.C_OP_RemapTransformOrientationToRotations(d); return (p, s) => op([p], 0, s, 1); },
   C_INIT_RandomSecondSequence(d) { const a = d.m_nSequenceMin ?? 0, b = d.m_nSequenceMax ?? 0; return (p) => { p.seq2 = a + Math.floor(rnd() * (b - a + 1)); }; },
-  C_INIT_RemapCPtoVector(d) { const op = OP.C_OP_RemapCPtoVector(d); return (p, s) => op([p], 0, s, 1); },
+  C_INIT_RemapCPtoVector(d) { const op = OP.C_OP_RemapCPtoVector(d), k = strength(d); return (p, s) => op([p], 0, s, k(s)); },
   C_INIT_CreateWithinBox(d) {
     const a = vector(d.m_vecMin), b = vector(d.m_vecMax), cp = d.m_nControlPointNumber ?? 0, local = d.m_bLocalSpace;
     return (p, s) => { const lo = a(p, s), hi = b(p, s), o = new THREE.Vector3(lerp(lo.x, hi.x, rnd()), lerp(lo.y, hi.y, rnd()), lerp(lo.z, hi.z, rnd())); if (local) o.applyQuaternion(s.cp(cp).quat); p.pos.copy(s.cp(cp).pos).add(o); p.prev.copy(p.pos); };
   },
   C_INIT_InheritVelocity: () => () => {},
+  // Children made where a parent particle was (where one died, in the game: here any of them).
+  C_INIT_InitFromParentKilled(d) { return INIT.C_INIT_CreateFromParentParticles({ m_bRandomDistribution: true }); },
+  // An epitrochoid in two of the control point's axes: radius 1 rolling round radius 2, the point at
+  // the offset from its centre, along the curve by particle number × density (or at random).
+  C_INIT_CreateInEpitrochoid(d) {
+    const c1 = d.m_nComponent1 ?? 0, c2 = d.m_nComponent2 ?? 1, tr = transform(d.m_TransformInput, d.m_nControlPointNumber ?? 0), density = number(d.m_flParticleDensity, 0.1), off = number(d.m_flOffset, 4), r1 = number(d.m_flRadius1, 40), r2 = number(d.m_flRadius2, 24);
+    const byCount = d.m_bUseCount, local = d.m_bUseLocalCoords, onExisting = d.m_bOffsetExistingPos;
+    return (p, s) => {
+      const R = r1(p, s), r = r2(p, s) || 1, o = off(p, s), u = byCount ? p.uid * density(p, s) : rnd() * Math.PI * 2 * Math.max(1, Math.abs(r));
+      const v = new THREE.Vector3(); if (c1 >= 0 && c1 <= 2) v.setComponent(c1, (R + r) * Math.cos(u) - o * Math.cos(((R + r) / r) * u)); if (c2 >= 0 && c2 <= 2) v.setComponent(c2, (R + r) * Math.sin(u) - o * Math.sin(((R + r) / r) * u));
+      const m = tr(s); if (local) v.applyMatrix3(new THREE.Matrix3().setFromMatrix4(m));
+      if (onExisting) p.pos.add(v); else p.pos.setFromMatrixPosition(m).add(v); p.prev.copy(p.pos);
+    };
+  },
+  // Points spread evenly over a sphere (a golden-angle spiral), pushed outward.
+  C_INIT_CreateSpiralSphere(d) {
+    const cp = d.m_nControlPointNumber ?? 0, n = Math.max(1, d.m_nDensity ?? 1), r = d.m_flInitialRadius ?? 1, v0 = d.m_flInitialSpeedMin ?? 0, v1 = d.m_flInitialSpeedMax ?? 0;
+    return (p, s) => { const i = p.uid % n, z = 1 - (2 * (i + 0.5)) / n, rr = Math.sqrt(Math.max(0, 1 - z * z)), a = Math.PI * (1 + Math.sqrt(5)) * i, dir = new THREE.Vector3(rr * Math.cos(a), rr * Math.sin(a), z);
+      p.pos.copy(s.cp(cp).pos).addScaledVector(dir, r); p.prev.copy(p.pos); p.vel.addScaledVector(dir, lerp(v0, v1, rnd())); };
+  },
+  // On the model, at a height above the control point.
+  C_INIT_CreateOnModelAtHeight(d) {
+    const cp = d.m_nControlPointNumber ?? 0, h = number(d.m_flDesiredHeight, 0);
+    return (p, s) => { const m = s.model; if (!m?.bones.length) return; const bone = m.bones[Math.floor(rnd() * m.bones.length)]; p.pos.copy(m.bonePosition(bone)); p.pos.z = s.cp(cp).pos.z + h(p, s); p.prev.copy(p.pos); };
+  },
+  // Rigid attachment to a control point: C_OP_MovementRigidAttachToCP carries the particles along.
+  C_INIT_SetRigidAttachment: () => () => {},
+  // The radius of the object at a control point: the hero's model scale, 1 here (Terrorblade's blade
+  // planes, drawn as models, are their own size; the default radius of 5 made them 30 m long).
+  C_INIT_RadiusFromCPObject: () => (p) => { p.radius = 1; },
   C_INIT_PositionPlaceOnGround(d) { const off = number(d.m_flOffset); return (p, s) => { p.pos.z = GROUND + off(p, s); p.prev.z = p.pos.z; }; },
   C_INIT_CreationNoise(d) {
     const out = field(d.m_nFieldOutput, F.Radius), lo = d.m_flOutputMin ?? 0, hi = d.m_flOutputMax ?? 1, ns = d.m_flNoiseScale ?? 0.1, nl = d.m_flNoiseScaleLoc ?? 0.001, abs = d.m_bAbsVal, inv = d.m_bAbsValInv, off = d.m_flOffset ?? 0;
@@ -781,7 +811,9 @@ const OP = {
     return (ps, dt, s) => { const c = s.cp(cp), o = local ? off.clone().applyQuaternion(c.quat) : off; for (const p of ps) { p.pos.copy(c.pos).add(o); p.prev.copy(p.pos); } };
   },
   C_OP_RemapCPOrientationToRotations(d) {
-    const cp = d.m_TransformInput?.m_nControlPoint ?? d.m_nCP ?? 0, offset = angles(vec(d.m_vecRotation));
+    // m_vecRotation turns about the x, y and z axes (Terrorblade's blade planes: z 90 lays them along
+    // the swords), not as pitch, yaw, roll.
+    const cp = d.m_TransformInput?.m_nControlPoint ?? d.m_nCP ?? 0, r = vec(d.m_vecRotation).multiplyScalar(Math.PI / 180), offset = new THREE.Quaternion().setFromEuler(new THREE.Euler(r.x, r.y, r.z, 'ZYX'));
     return (ps, dt, s) => { const q = s.cp(cp).quat.clone().multiply(offset), e = new THREE.Euler().setFromQuaternion(q, 'ZYX');
       for (const p of ps) { p.orient = q.clone(); p.rot.set(e.z, e.y, e.x); } };
   },
@@ -806,6 +838,46 @@ const OP = {
   // Particles faded out below a minimum alpha die (systems without C_OP_Decay end their particles so).
   C_OP_AlphaDecay(d) { const min = d.m_flMinAlpha ?? 0; return (ps) => { for (const p of ps) if (p.alpha <= min && p.age > 0) p.dead = true; }; },
   C_OP_EnableChildrenFromParentParticleCount: () => () => {},
+  // Starts a group of children again and again (their emitters from the start), every refire time.
+  C_OP_RepeatedTriggerChildGroup(d) {
+    const group = d.m_nChildGroupID ?? 0, refire = number(d.m_flClusterRefireTime, 1), cooldown = number(d.m_flClusterCooldown, 0); let t = 0;
+    return (ps, dt, s) => { t += dt; if (t < refire(null, s) + cooldown(null, s)) return; t = 0;
+      for (const k of s.sim.children) if (k.groupId === group) for (const sim of k.all()) { sim.stopped = false; for (const e of sim.emitters) e.fn.reset?.(); } };
+  },
+  // A particle (the first, the last or a numbered one) held at a control point, with an offset.
+  C_OP_PinParticleToCP(d) {
+    const cp = d.m_nControlPoint ?? 0, off = vector(d.m_vecOffset), local = d.m_bOffsetLocal, sel = d.m_nParticleSelection || 'PARTICLE_SELECTION_FIRST', num = number(d.m_nParticleNumber, 0);
+    return (ps, dt, s) => { if (!ps.length) return; const p = sel === 'PARTICLE_SELECTION_LAST' ? ps[ps.length - 1] : sel === 'PARTICLE_SELECTION_NUMBER' ? ps[Math.min(ps.length - 1, Math.max(0, Math.floor(num(null, s))))] : ps[0];
+      const c = s.cp(cp), o = off(p, s).clone(); if (local) o.applyQuaternion(c.quat); p.pos.copy(c.pos).add(o); p.prev.copy(p.pos); };
+  },
+  C_OP_InheritFromParentParticlesV2(d) { return OP.C_OP_InheritFromParentParticles(d); },
+  C_OP_OscillateVectorSimple(d) {
+    return OP.C_OP_OscillateVector({ ...d, m_RateMin: d.m_Rate, m_RateMax: d.m_Rate, m_FrequencyMin: d.m_Frequency ?? [1, 1, 1], m_FrequencyMax: d.m_Frequency ?? [1, 1, 1], m_bProportional: false });
+  },
+  // A vector field pointing from the particle to a control point.
+  C_OP_RemapDirectionToCPToVector(d) {
+    const cp = d.m_nCP ?? 0, out = field(d.m_nFieldOutput, F.Normal), scale = d.m_flScale ?? 1, normalize = d.m_bNormalize;
+    return (ps, dt, s) => { const c = s.cp(cp).pos; for (const p of ps) { const v = c.clone().sub(p.pos); if (normalize) v.normalize(); p.setV(out, v.multiplyScalar(scale)); } };
+  },
+  // The difference of a field from the previous particle's, remapped.
+  C_OP_DifferencePreviousParticle(d) {
+    const fin = field(d.m_nFieldInput, F.Radius), out = field(d.m_nFieldOutput, F.Radius), i0 = d.m_flInputMin ?? 0, i1 = d.m_flInputMax ?? 1, o0 = d.m_flOutputMin ?? 0, o1 = d.m_flOutputMax ?? 1, method = d.m_nSetMethod, active = d.m_bActiveRange;
+    return (ps) => { for (let i = 1; i < ps.length; i++) { const x = ps[i].getS(fin) - ps[i - 1].getS(fin); if (active && (x < i0 || x > i1)) continue; ps[i].setS(out, setMethod(ps[i], out, remapClamped(x, i0, i1, o0, o1), method, true)); } };
+  },
+  // How far along from one control point to another a particle is, remapped into a field.
+  C_OP_PercentageBetweenCPs(d) {
+    const out = field(d.m_nFieldOutput, F.Alpha), i0 = d.m_flInputMin ?? 0, i1 = d.m_flInputMax ?? 1, o0 = d.m_flOutputMin ?? 0, o1 = d.m_flOutputMax ?? 1, a = d.m_nStartCP ?? 0, b = d.m_nEndCP ?? 1, method = d.m_nSetMethod, active = d.m_bActiveRange, radial = d.m_bRadialCheck !== false;
+    return (ps, dt, s) => { const A = s.cp(a).pos, B = s.cp(b).pos, seg = B.clone().sub(A), len2 = Math.max(1e-6, seg.lengthSq());
+      for (const p of ps) { const x = radial ? p.pos.distanceTo(A) / Math.sqrt(len2) : p.pos.clone().sub(A).dot(seg) / len2; if (active && (x < i0 || x > i1)) continue; p.setS(out, setMethod(p, out, remapClamped(x, i0, i1, o0, o1), method, true)); } };
+  },
+  // The world, here the ground under the hero: particles stop at it, bouncing back by the bounce amount.
+  C_OP_WorldTraceConstraint(d) {
+    const radius = number(d.m_flCollisionRadius ?? d.m_flRadiusScale, 0), bounce = number(d.m_flBounceAmount, 0), slide = number(d.m_flSlideAmount, 0);
+    return (ps, dt, s) => { let moved = false;
+      for (const p of ps) { const floor = GROUND + radius(p, s); if (p.pos.z >= floor) continue;
+        const vz = p.pos.z - p.prev.z; p.pos.z = floor; p.prev.z = floor + vz * bounce(p, s); const k = slide(p, s); p.prev.x = lerp(p.pos.x, p.prev.x, k); p.prev.y = lerp(p.pos.y, p.prev.y, k); moved = true; }
+      return moved; };
+  },
   C_OP_DistanceCull(d) {
     const cp = d.m_nControlPointNumber ?? 0, dist = d.m_flDistance ?? 0, inside = d.m_bCullInside, off = vec(d.m_vecPointOffset);
     return (ps, dt, s) => { const c = s.cp(cp).pos.clone().add(off); for (const p of ps) { const far = p.pos.distanceTo(c) > dist; if (far !== !!inside) p.dead = true; } };
@@ -815,9 +887,17 @@ const OP = {
     return (ps, dt, s, str) => { const c = s.cp(cp), ax = local ? axis.clone().applyQuaternion(c.quat) : axis, q = new THREE.Quaternion().setFromAxisAngle(ax, rate(null, s) * Math.PI / 180 * dt * str);
       for (const p of ps) { p.pos.sub(c.pos).applyQuaternion(q).add(c.pos); p.prev.sub(c.pos).applyQuaternion(q).add(c.pos); } };
   },
+  // A control point's position as a vector field (an item's prismatic gem: its colour in CP 15 scales
+  // the particles' colour, at the strength CP 16 gives); set like a scalar (scale or add to the initial).
   C_OP_RemapCPtoVector(d) {
-    const cp = d.m_nCPInput ?? 0, out = field(d.m_nFieldOutput, F.Color), i0 = vec(d.m_vInputMin), i1 = vec(d.m_vInputMax, [1, 1, 1]), o0 = vec(d.m_vOutputMin), o1 = vec(d.m_vOutputMax, [1, 1, 1]);
-    return (ps, dt, s) => { const x = s.cp(cp).pos, v = new THREE.Vector3(...[0, 1, 2].map((k) => remapClamped(x.getComponent(k), i0.getComponent(k), i1.getComponent(k), o0.getComponent(k), o1.getComponent(k)))); for (const p of ps) p.setV(out, v.clone()); };
+    const cp = d.m_nCPInput ?? 0, out = field(d.m_nFieldOutput, F.Color), i0 = vec(d.m_vInputMin), i1 = vec(d.m_vInputMax, [1, 1, 1]), o0 = vec(d.m_vOutputMin), o1 = vec(d.m_vOutputMax, [1, 1, 1]), method = d.m_nSetMethod;
+    return (ps, dt, s, str = 1) => {
+      const x = s.cp(cp).pos, v = new THREE.Vector3(...[0, 1, 2].map((k) => remapClamped(x.getComponent(k), i0.getComponent(k), i1.getComponent(k), o0.getComponent(k), o1.getComponent(k))));
+      for (const p of ps) {
+        const base = /INITIAL/.test(method || '') ? p.initV(out) : p.getV(out), to = /SCALE/.test(method || '') ? base.clone().multiply(v) : /ADD/.test(method || '') ? base.clone().add(v) : v.clone();
+        p.setV(out, p.getV(out).clone().lerp(to, Math.min(1, str)));
+      }
+    };
   },
   C_OP_DampenToCP(d) {
     const cp = d.m_nControlPointNumber ?? 0, range = d.m_flRange ?? 100, scale = d.m_flScale ?? 1;
@@ -883,6 +963,11 @@ Object.assign(OP, {
   C_OP_TurbulenceForce(d) {
     const oct = [[1, 1], [0, 0.5], [0, 0.25], [0, 0.125]].map(([f, a], i) => [d[`m_flNoiseCoordScale${i}`] ?? f, vec(d[`m_vecNoiseAmount${i}`], [a, a, a])]);
     return (ps) => { for (const p of ps) for (const [f, a] of oct) p.force.add(valueVector(p.pos.clone().multiplyScalar(f)).multiply(a)); };
+  },
+  // An acceleration in a control point's axes.
+  C_OP_LocalAccelerationForce(d) {
+    const cp = d.m_nCP ?? -1, accel = vector(d.m_vecAccel);
+    return (ps, dt, s, str) => { for (const p of ps) { const v = accel(p, s).clone(); if (cp >= 0) v.applyQuaternion(s.cp(cp).quat); p.force.add(v.multiplyScalar(str)); } };
   },
   C_OP_PerParticleForce(d) {
     const k = number(d.m_flForceScale, 1), force = vector(d.m_vForce), cp = d.m_nCP ?? -1;
@@ -957,7 +1042,7 @@ Object.assign(OP, {
   // Line of sight (m_bLOS) would need world traces: never blocked here.
   C_OP_DistanceBetweenCPsToCP(d) {
     const i0 = d.m_flInputMin ?? 0, i1 = d.m_flInputMax ?? 128, o0 = d.m_flOutputMin ?? 0, o1 = d.m_flOutputMax ?? 1, a = d.m_nStartCP ?? 0, b = d.m_nEndCP ?? 1, out = d.m_nOutputCP ?? 2, f = Math.min(2, Math.max(0, d.m_nOutputCPField ?? 0));
-    return (ps, dt, s) => { const v = cpValue(s, out); v.setComponent(f, remapClamped(s.cp(a).pos.distanceTo(s.cp(b).pos), i0, i1, o0, o1)); setCPValue(s, out, v); };
+    return (ps, dt, s) => { const v = cpValue(s, out); if (f >= 0 && f <= 2) v.setComponent(f, remapClamped(s.cp(a).pos.distanceTo(s.cp(b).pos), i0, i1, o0, o1)); setCPValue(s, out, v); };
   },
   C_OP_SetControlPointToVectorExpression(d) {
     const out = d.m_nOutputCP ?? 2, a = vector(d.m_vInput1), b = vector(d.m_vInput2), k = number(d.m_flLerp);
@@ -1157,6 +1242,14 @@ Object.assign(OP, {
 });
 
 const EMIT = {
+  // Keeps the system at a number of particles: what died is made again (at a rate, if one is given).
+  C_OP_MaintainEmitter(d) {
+    const count = number(d.m_nParticlesToMaintain, 100), start = number(d.m_flStartTime), rate = number(d.m_flEmissionRate, 0); let pending = 0;
+    return { reset() { pending = 0; }, emit(dt, s, emit) {
+      if (s.age < start(null, s)) return; let k = Math.min(Math.floor(count(null, s)), s.max) - s.sim.particles.length; if (k <= 0) return;
+      const r = rate(null, s); if (r > 0) { pending += r * dt; const n = Math.floor(pending); pending -= n; k = Math.min(k, n); }
+      for (let i = 0; i < k; i++) emit(0); } };
+  },
   C_OP_ContinuousEmitter(d) {
     const dur = number(d.m_flEmissionDuration), start = number(d.m_flStartTime), rate = number(d.m_flEmitRate, 100); let pending = 0, flushed = 0, finished = false;
     return { reset() { pending = 0; flushed = 0; finished = false; }, emit(dt, s, emit) {
@@ -1216,7 +1309,7 @@ export class Simulation {
     this.version = def.m_nBehaviorVersion ?? 0; this.firstMultiple = def.m_nFirstMultipleOverride_BackwardCompat ?? -1;
     this.inits = (def.m_Initializers || []).map((d, index) => {
       if (d.m_bDisableOperator || endcapSkip(d)) return null; const f = INIT[d._class]; if (!f) { lib.unsupported.add(d._class); return null; }
-      const fn = f(d); return fn ? { fn, index, fields: writes(d) } : null;
+      const fn = f(d); return fn ? { fn, index, fields: writes(d), strength: d.m_flOpStrength !== undefined ? strength(d) : null } : null;
     }).filter(Boolean);
     // Force generators run from the movement operator. Constraints run after the operators, and again
     // while another one moved particles, up to the movement operator's m_nMaxConstraintPasses rounds.
@@ -1233,6 +1326,13 @@ export class Simulation {
     }
     this.delay = 0; this.stopped = false;
   }
+  // A prismatic gem in an item whose effects do not read one (made before Source 2's gem points,
+  // Shadow Fiend's Desolation): their colour is the gem's at their own brightness. null: their own.
+  setTint(color) {
+    for (const sim of this.all()) for (const r of sim.renderers) { const u = r.batch?.mesh.material.uniforms; if (!u || u.mode.value === 5) continue; u.tinted.value = !!color; if (color) u.tint.value.set(color.r, color.g, color.b); }
+  }
+  // Whether this system (or a child) reads a prismatic gem's control point itself.
+  get readsGem() { return this._readsGem ??= /"m_nCPInput":15\b/.test(JSON.stringify(this.def)) || this.children.some((c) => c.readsGem); }
   // No more particles from here on (the effect's animation ended): those alive live out their lives,
   // with the operators of the end cap.
   stopEmission() { for (const sim of this.all()) if (!sim.stopped) { sim.stopped = true; sim.state.endedAt = sim.state.age; } }
@@ -1246,6 +1346,8 @@ export class Simulation {
     let written = new Set([F.CreationTime]);
     for (const i of this.inits) {
       if (this.version < 6 && (this.firstMultiple < 0 || i.index < this.firstMultiple) && i.fields.length && i.fields.every((f) => written.has(f))) continue;
+      // An initializer at strength 0 does nothing (one gated by an item's gem, without a gem).
+      if (i.strength && i.strength(this.state) <= 0) continue;
       i.fn(p, this.state); for (const f of i.fields) written.add(f);
     }
     // The previous position one previous step back: movement scales the step by dt / previous dt.
@@ -1296,11 +1398,12 @@ attribute vec4 color; attribute vec4 uvA; attribute vec4 uvB; attribute float bl
 varying vec4 vColor; varying vec2 vUvA; varying vec2 vUvB; varying float vBlend;
 void main() { vColor = color; vUvA = mix(uvA.xy, uvA.zw, uv); vUvB = mix(uvB.xy, uvB.zw, uv); vBlend = blend; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`;
 const fragmentShader = `
-uniform sampler2D map; uniform float overbright; uniform float addSelf; uniform bool saturateColor; uniform int mode; uniform bool blendFrames;
+uniform sampler2D map; uniform float overbright; uniform float addSelf; uniform bool saturateColor; uniform int mode; uniform bool blendFrames; uniform bool tinted; uniform vec3 tint;
 varying vec4 vColor; varying vec2 vUvA; varying vec2 vUvB; varying float vBlend;
 void main() {
   vec4 t = texture2D(map, vUvA); if (blendFrames) t = mix(t, texture2D(map, vUvB), vBlend);
   vec3 c = vColor.rgb * t.rgb; float a = t.a * vColor.a;
+  if (tinted) c = tint * max(c.r, max(c.g, c.b));
   if (mode == 5) { vec3 m = mix(vec3(0.5), mix(vec3(0.5), c, vColor.rgb), vec3(a)); gl_FragColor = vec4(clamp(m, 0.0, 1.0), a); return; }
   c *= overbright; if (saturateColor) c = clamp(c, 0.0, 1.0); c *= addSelf;
   gl_FragColor = vec4(c * a, mode == 1 ? 0.0 : a);
@@ -1311,7 +1414,7 @@ function material(tex, r) {
   const mode = r.m_nOutputBlendMode === 'PARTICLE_OUTPUT_BLEND_MODE_ADD' ? 1 : r.m_nOutputBlendMode === 'PARTICLE_OUTPUT_BLEND_MODE_MOD2X' ? 5 : 0;
   const m = new THREE.ShaderMaterial({
     vertexShader, fragmentShader, transparent: true, depthWrite: false, side: THREE.DoubleSide,
-    uniforms: { map: { value: tex }, overbright: { value: number(r.m_flOverbrightFactor, 1)(null, null) }, addSelf: { value: 1 + number(r.m_flAddSelfAmount, 0)(null, null) },
+    uniforms: { tinted: { value: false }, tint: { value: new THREE.Vector3(1, 1, 1) }, map: { value: tex }, overbright: { value: number(r.m_flOverbrightFactor, 1)(null, null) }, addSelf: { value: 1 + number(r.m_flAddSelfAmount, 0)(null, null) },
       saturateColor: { value: r.m_bSaturateColorPreAlphaBlend !== false }, mode: { value: mode }, blendFrames: { value: r.m_bBlendFramesSeq0 !== false } },
   });
   // Mod2x: colour = 2 × source × destination, so 50 % grey changes nothing. The canvas's alpha must
@@ -1334,6 +1437,7 @@ class QuadBatch {
     g.setIndex(new THREE.BufferAttribute(idx, 1));
     for (const [n, a, k] of [['position', this.pos, 3], ['uv', this.uv, 2], ['color', this.col, 4], ['uvA', this.ua, 4], ['uvB', this.ub, 4], ['blend', this.bl, 1]]) g.setAttribute(n, new THREE.BufferAttribute(a, k).setUsage(THREE.DynamicDrawUsage));
     for (let i = 0; i < capacity; i++) this.uv.set([0, 1, 0, 0, 1, 0, 1, 1], i * 8);
+    g.setDrawRange(0, 0); // nothing until the first frame fills it (not the whole empty buffer)
     this.mesh = new THREE.Mesh(g, material(tex, r)); this.mesh.frustumCulled = false; this.mesh.renderOrder = 10; group.add(this.mesh); this.n = 0;
   }
   begin() { this.n = 0; }

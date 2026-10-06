@@ -243,6 +243,16 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .styles span { width: 100%; font: 500 10px/1 var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
 .styles button { font: 500 12px/1 var(--text); color: var(--paper-2); padding: 6px 9px; border: 1px solid var(--line-2); border-radius: 3px; }
 .styles button[aria-pressed='true'] { color: var(--ink); background: var(--paper); border-color: var(--paper); }
+.gems { display: flex; flex-wrap: wrap; gap: 5px; padding: 10px 16px 14px; border-top: 1px solid var(--line); }
+.gems[hidden] { display: none; }
+.gems span { width: 100%; font: 500 10px/1 var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+.gems span[title] { cursor: help; }
+.gems span[title]::after { content: ' ≈'; }
+.gems button { width: 18px; height: 18px; border-radius: 50%; background: var(--g); box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.35); transition: transform 0.12s; }
+.gems button:hover { transform: scale(1.15); }
+.gems button[aria-pressed='true'] { outline: 2px solid var(--paper); outline-offset: 2px; }
+.gems button.none { background: transparent; box-shadow: inset 0 0 0 1px var(--line-2); position: relative; }
+.gems button.none::after { content: ''; position: absolute; left: 3px; right: 3px; top: 50%; height: 1px; background: var(--muted); transform: rotate(-45deg); }
 .empty-items { color: var(--muted); font: 400 12px/1.4 var(--mono); padding: 8px 4px; }
 
 /* ---------------------------------------------------------------- narrow screens */

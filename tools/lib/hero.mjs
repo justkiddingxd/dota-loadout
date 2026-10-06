@@ -213,13 +213,18 @@ export async function buildBundle({ game, cli, out, temp, log = () => {}, MODELS
     const colorFile = pick('_color') || (!constant && tcolor && join(dir, tcolor)) || (p.TextureColor && !constant && existsSync(join(dir, basename(p.TextureColor))) ? join(dir, basename(p.TextureColor)) : null);
     // A constant colour only for a layer with its own mask (Marci's eye shadow); others without a
     // texture (Kez's grappling rope) are ability meshes the game keeps hidden.
+    // An additive layer of a constant colour is drawn too (glass: Pudge's clown car, Arc Warden's
+    // helmets — reflections, rim and glints over what lies behind).
     const maskFile = constant && !colorFile ? (tcolor && join(dir, tcolor)) || pick('_trans') : null;
-    if (!colorFile && !maskFile) { log(`  ${name}: no colour texture (${p.shader})`); delete materials[name]; continue; }
+    // crystal.vfx (Hoodwink's and Ogre Magi's glass): a see-through tinted colour, at g_flOpacityScale.
+    const crystal = p.shader === 'crystal.vfx';
+    const flat = !colorFile && !maskFile && constant && (p.F_ADDITIVE_BLEND === '1' || crystal);
+    if (!colorFile && !maskFile && !flat) { log(`  ${name}: no colour texture (${p.shader})`); delete materials[name]; continue; }
     // Colour with the alpha-test mask in alpha. Textures need not be square: the colour keeps its own
     // shape, the masks below are stretched to squares, which keeps their UVs.
     const original = colorFile ? await image(colorFile) : await (async () => {
-      const m = await image(maskFile), k = createCanvas(m.width, m.height), x = k.getContext('2d');
-      x.fillStyle = `rgb(${constant.slice(0, 3).map((v) => Math.round(Math.min(1, v) * 255)).join(',')})`; x.fillRect(0, 0, k.width, k.height);
+      const m = flat ? null : await image(maskFile), k = createCanvas(m?.width || 4, m?.height || 4), x = k.getContext('2d');
+      x.fillStyle = `rgba(${constant.slice(0, 3).map((v) => Math.round(Math.min(1, v) * 255)).join(',')},${crystal ? +(p.g_flOpacityScale ?? 0.5) : 1})`; x.fillRect(0, 0, k.width, k.height);
       // The mask's alpha (…_g_tcolor_…) or its grey (…_trans) becomes the colour's alpha below, through _trans or here.
       if (tcolor && maskFile === join(dir, tcolor)) { const a = channel(m, k.width, k.height), d = x.getImageData(0, 0, k.width, k.height); for (let i = 0; i < a.length; i += 4) d.data[i + 3] = a[i + 3]; x.putImageData(d, 0, 0); }
       return k;
@@ -263,7 +268,7 @@ export async function buildBundle({ game, cli, out, temp, log = () => {}, MODELS
     }
     // The cube map (F_SPECULAR_CUBE_MAP): its six faces in a strip, in the game's axes +X −X +Y −Y +Z −Z
     // (rt lf bk ft up dn), 128 px each; shared.
-    const cube = p.F_SPECULAR_CUBE_MAP === '1' && /"g_tCubeMap"\s+"([^"]+)\.vtex"/.exec(text)?.[1], cubeName = cube ? `${basename(cube).replace(/_tga_|_psd_|_png_/, '_')}_cube` : null;
+    const cube = p.F_SPECULAR_CUBE_MAP === '1' && /"g_tCubeMap(?:Exterior)?"\s+"([^"]+)\.vtex"/.exec(text)?.[1], cubeName = cube ? `${basename(cube).replace(/_tga_|_psd_|_png_/, '_')}_cube` : null;
     if (cube && !shared.has(cubeName) && has(`${cube}.vtex`)) {
       const cdir = join(temp, 'cube', cubeName); await decompile(`${cube}.vtex`, join(cdir, 'cube.png'));
       const faces = ['rt', 'lf', 'bk', 'ft', 'up', 'dn'].map((s) => readdirSync(cdir).find((x) => x.endsWith(`_${s}.png`)));
@@ -279,10 +284,10 @@ export async function buildBundle({ game, cli, out, temp, log = () => {}, MODELS
       color: await webp(c, join(out, 'textures', `${name}_color.webp`)), masks, specular,
       normal: n ? await webp(n, join(out, 'textures', `${name}_normal.webp`), 92) : null, detail: detailName ? shared.get(detailName) || null : null, fresnel: warpName ? shared.get(warpName) || null : null,
       detailMode: +(p.F_DETAIL || 0), detailScale: vector(p.g_vDetailTexCoordScale).slice(0, 2), detailScroll: scroll ? [+scroll[1], +scroll[2]] : [0, 0], detailBlend: +(p.g_flDetailBlendFactor ?? 1),
-      rimColor: vector(p.g_vRimLightColor).slice(0, 3), rimScale: +(p.g_flRimLightScale ?? 0), specColor: vector(p.g_vSpecularColor).slice(0, 3), specScale: +(p.g_flSpecularScale ?? 1),
+      rimColor: vector(p.g_vRimLightColor).slice(0, 3), rimScale: +(p.g_flRimLightScale ?? 0), specColor: vector(p.g_vSpecularColor).slice(0, 3), specScale: +(crystal ? p.g_flSpecularIntensity ?? 1 : p.g_flSpecularScale ?? 1),
       diffuseWarp: diffuseName ? shared.get(diffuseName) || undefined : undefined,
-      cube: cubeName ? shared.get(cubeName) || undefined : undefined, cubeScale: cubeName ? +(p.g_flCubeMapScalar ?? 1) : undefined, cubeByMetalness: p.F_MASK_CUBE_MAP_BY_METALNESS === '1' || undefined,
-      specExponent: +(p.g_flSpecularExponent ?? 16), alphaTest: p.F_ALPHA_TEST === '1' ? +(p.g_flAlphaTestReference ?? 0.5) : 0, translucent: p.F_TRANSLUCENT === '1' || undefined, additive: p.F_ADDITIVE_BLEND === '1' || undefined,
+      cube: cubeName ? shared.get(cubeName) || undefined : undefined, cubeScale: cubeName ? +(p.g_flCubeMapScalar ?? (p.g_flCubeMapScalarExterior !== undefined ? p.g_flCubeMapScalarExterior / 6 : 1)) : undefined, cubeByMetalness: p.F_MASK_CUBE_MAP_BY_METALNESS === '1' || undefined,
+      specExponent: +(p.g_flSpecularExponent ?? 16), alphaTest: p.F_ALPHA_TEST === '1' ? +(p.g_flAlphaTestReference ?? 0.5) : 0, translucent: p.F_TRANSLUCENT === '1' || crystal || undefined, additive: p.F_ADDITIVE_BLEND === '1' || undefined,
     };
   }
 

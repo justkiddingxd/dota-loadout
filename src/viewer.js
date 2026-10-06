@@ -93,6 +93,8 @@ void main() {
     if (current()) await hero.wear(slot, item, style, current);
   }
   get worn() { return this.hero?.worn || {}; }
+  // A prismatic gem in what a slot wears: '#rrggbb', or null.
+  gem(slot, hex) { this.hero?.gem(slot, hex); }
   unload() { if (!this.hero) return; this.scene.remove(this.hero.lib.group, this.hero.turntable); this.hero.dispose(); this.hero = null; }
 
   get animations() { return this.hero?.animations || []; }
@@ -376,26 +378,36 @@ async function buildHero(manifest, url, manager, time, light) {
     for (const d of drivers) if (!follows(d)) e.fixed.set(d.cp, placeCP(d, owner, origin));
     return e;
   };
+  // Prismatic gems by slot: the game gives an item's effects the gem's colour (0–255) in control
+  // point 15 and turns it on with CP 16 = (1, 1, 0); without a gem both are 0 (not CP 0 standing in).
+  const gems = new Map(), GEMLESS = cpOf(new THREE.Matrix4());
+  const gemPoints = (owner) => { const g = gems.get(owner); if (!g) return [GEMLESS, GEMLESS];
+    const color = cpOf(new THREE.Matrix4().makeTranslation(g.r, g.g, g.b)), on = cpOf(new THREE.Matrix4().makeTranslation(1, 1, 0)); return [color, on]; };
   const drive = (e, origin) => {
     const cps = e.sim.cps; cps.clear(); cps.set(0, cpOf(origin));
+    const [color, on] = gemPoints(e.owner); cps.set(15, color); cps.set(16, on);
+    // An effect that does not read the gem takes its colour as a tint instead.
+    const g = gems.get(e.owner), tint = g && !e.sim.readsGem ? `${g.r},${g.g},${g.b}` : null;
+    if (tint !== e.tint) { e.tint = tint; e.sim.setTint(tint ? new THREE.Color(`rgb(${tint})`) : null); }
     for (const d of e.drivers) cps.set(d.cp, e.fixed.get(d.cp) || placeCP(d, e.owner, origin));
   };
   // The ambient effects: the hero's own and his items' — a slot's default ones only while it wears
   // its default. Worn items may put their own effects and snapshots in place of the hero's.
   let effects = [];
-  const replaced = new Map();
+  const replaced = new Map(), replacedBy = new Map();
   const ambient = () => {
     for (const e of effects) e.sim.dispose();
-    replaced.clear(); lib.aliases.clear();
+    replaced.clear(); replacedBy.clear(); lib.aliases.clear();
     const list = (manifest.effects || []).filter((e) => !worn.get(e.owner)?.item);
     // A slot's default replaces effects while it is worn (the hero's own default, always).
     for (const [slot, r] of Object.entries(manifest.replace || {})) if (!worn.get(slot)?.item) for (const [from, to] of Object.entries(r)) replaced.set(from, to);
     for (const [slot, w] of worn) if (w.item) {
       for (const system of w.style.effects) list.push({ system, owner: slot });
-      for (const [from, to] of Object.entries(w.style.particles)) replaced.set(from, to);
+      // An effect an item puts in place of the hero's is the item's (its gem colours it).
+      for (const [from, to] of Object.entries(w.style.particles)) { replaced.set(from, to); replacedBy.set(from, slot); }
       for (const [from, to] of Object.entries(w.style.snapshots)) lib.aliases.set(from, to);
     }
-    effects = list.map((e) => { const def = lib.system(replaced.get(e.system) ?? e.system); return def ? instance(def, e.owner, driversFor(def, null)) : null; }).filter(Boolean);
+    effects = list.map((e) => { const def = lib.system(replaced.get(e.system) ?? e.system); return def ? instance(def, replacedBy.get(e.system) || e.owner, driversFor(def, null)) : null; }).filter(Boolean);
   };
   ambient();
 
@@ -407,7 +419,7 @@ async function buildHero(manifest, url, manager, time, light) {
     // Events give attach types in short (point_follow) or as the game's names (PATTACH_POINT_FOLLOW).
     const attachType = (type, att) => (type ? (/^PATTACH_/.test(type) ? type : `PATTACH_${type.toUpperCase()}`) : att ? 'PATTACH_POINT_FOLLOW' : 'PATTACH_ABSORIGIN_FOLLOW');
     const drivers = ev.points ? ev.points.map(([att, type], cp) => att || cp === 0 ? { cp, type: attachType(type, att), attachment: att, offset: null } : null).filter(Boolean) : driversFor(def, ev.config);
-    live.push(Object.assign(instance(def, 'hero', drivers), { system: ev.system, sequence: ev.sequence, stopOnSeqChange: ev.stopOnSeqChange, born: 0 }));
+    live.push(Object.assign(instance(def, replacedBy.get(ev.system) || 'hero', drivers), { system: ev.system, sequence: ev.sequence, stopOnSeqChange: ev.stopOnSeqChange, born: 0 }));
   };
   let lastName = null, lastTime = 0;
   const schedule = () => {
@@ -455,6 +467,15 @@ async function buildHero(manifest, url, manager, time, light) {
       for (const [mesh, i] of samples) { mesh.getVertexPosition(i, point).applyMatrix4(mesh.matrixWorld).project(camera); s.expandByPoint(new THREE.Vector2(point.x, point.y)); }
       return s.expandByVector(s.getSize(new THREE.Vector2()).multiplyScalar(0.03));
     },
+    // Puts a prismatic gem in a slot's item (a colour '#rrggbb', or null to take it out); its effects
+    // start again in the gem's colour.
+    gem(slot, hex) {
+      if (hex) { const c = parseInt(hex.replace('#', ''), 16); gems.set(slot, { r: (c >> 16) & 255, g: (c >> 8) & 255, b: c & 255 }); } else gems.delete(slot);
+      ambient();
+    },
+    get gems() { return Object.fromEntries([...gems].map(([slot, g]) => [slot, `#${((g.r << 16) | (g.g << 8) | g.b).toString(16).padStart(6, '0')}`])); },
+    // The meshes a slot wears now (for checks and tools).
+    slotMeshes: (slot) => worn.get(slot)?.meshes || [],
     // What each slot wears: its item's id and style, or null for its default.
     get worn() { return Object.fromEntries([...worn].map(([slot, w]) => [slot, w.item ? { id: w.item, style: w.styleIndex } : null])); },
     // Puts an item on a slot — source: { manifest, url(path) } of an item folder, with the style's

@@ -3,7 +3,7 @@ import { HeroViewer } from '../src/index.js';
 const T = {
   ru: {
     search: 'Найти героя', attrs: { str: 'Сила', agi: 'Ловкость', int: 'Интеллект', all: 'Универсал' }, short: { str: 'STR', agi: 'AGI', int: 'INT', all: 'UNI' },
-    animations: 'Анимации', items: 'Предметы', sets: 'Сеты', defaultItem: 'Стандартный', findItem: 'Найти предмет', style: 'Стиль', allDefault: 'Всё стандартное', noItems: 'Ничего не нашлось', reset: 'Сброс', embed: 'Встроить', copy: 'Копировать', copied: 'Скопировано',
+    animations: 'Анимации', items: 'Предметы', sets: 'Сеты', defaultItem: 'Стандартный', findItem: 'Найти предмет', style: 'Стиль', gem: 'Призматический самоцвет', gemTint: 'эффекты этого предмета не читают самоцвет: цвет наложен поверх', noGem: 'Без самоцвета', allDefault: 'Всё стандартное', noItems: 'Ничего не нашлось', reset: 'Сброс', embed: 'Встроить', copy: 'Копировать', copied: 'Скопировано',
     loading: 'Загрузка', failed: 'Не удалось загрузить героя', nothing: 'Никого не нашлось',
     hint: 'Тяни, чтобы повернуть  ·  колесо — ближе / дальше', hintTouch: 'Тяни, чтобы повернуть',
     colophon: 'Герои Dota 2 прямо в браузере: игровой шейдер, анимации и эффекты частиц. Код открыт под MIT, модели и текстуры принадлежат Valve.',
@@ -14,7 +14,7 @@ const T = {
   },
   en: {
     search: 'Find a hero', attrs: { str: 'Strength', agi: 'Agility', int: 'Intelligence', all: 'Universal' }, short: { str: 'STR', agi: 'AGI', int: 'INT', all: 'UNI' },
-    animations: 'Animations', items: 'Items', sets: 'Sets', defaultItem: 'Default', findItem: 'Find an item', style: 'Style', allDefault: 'All default', noItems: 'Nothing found', reset: 'Reset', embed: 'Embed', copy: 'Copy', copied: 'Copied',
+    animations: 'Animations', items: 'Items', sets: 'Sets', defaultItem: 'Default', findItem: 'Find an item', style: 'Style', gem: 'Prismatic gem', gemTint: 'this item’s effects do not read a gem: its colour is laid over them', noGem: 'No gem', allDefault: 'All default', noItems: 'Nothing found', reset: 'Reset', embed: 'Embed', copy: 'Copy', copied: 'Copied',
     loading: 'Loading', failed: 'Could not load the hero', nothing: 'Nobody by that name',
     hint: 'Drag to turn  ·  wheel to zoom', hintTouch: 'Drag to turn',
     colophon: 'Dota 2 heroes live in the browser: the game’s hero shader, animations and particle effects. The code is MIT; models and textures belong to Valve.',
@@ -31,7 +31,7 @@ const stored = (() => { try { return localStorage.getItem('loadout-lang'); } cat
 let lang = stored || (/^(ru|uk|be|kk)/i.test(navigator.language) ? 'ru' : 'en');
 const t = () => T[lang];
 
-const state = { index: null, heroes: [], current: null, filter: new Set(), query: '', active: null, playing: null, catalog: null, worn: {}, drawer: null, itemQuery: '' };
+const state = { gems: {}, palette: [], index: null, heroes: [], current: null, filter: new Set(), query: '', active: null, playing: null, catalog: null, worn: {}, drawer: null, itemQuery: '' };
 
 // ---------------------------------------------------------------- viewer
 const canvas = $('[data-view]');
@@ -158,7 +158,7 @@ async function open(id) {
     // The catalog first: what the address has him wear may be another form of him (a persona, an arcana).
     state.catalog = await fetch(`heroes/${h.id}/items.json`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
     if (ticket !== loads) return;
-    state.worn = valid(parseHash().worn);
+    const asked = parseHash(); state.worn = valid(asked.worn); state.gems = Object.fromEntries(Object.entries(asked.gems).filter(([slot]) => state.worn[slot]));
     await reload(ticket);
   } catch (e) {
     if (ticket !== loads) return;
@@ -183,17 +183,19 @@ async function reload(ticket = ++loads) {
   state.animations = loaded.animations; renderHero(h); mark(idleOf(h));
   writeHash(); renderRail(); if (state.drawer) renderDrawer();
   await Promise.all(Object.entries(state.worn).filter(([slot, w]) => w && applies(slot)).map(([slot, [id, style]]) => viewer.wear(slot, `items/${id}/`, style).catch((e) => console.error(e))));
+  applyGems();
 }
 
 // ---------------------------------------------------------------- wardrobe
-// The address keeps the hero and what he wears: #juggernaut/weapon=6058.1,head=7413 (item.style).
+// The address keeps the hero and what he wears: #juggernaut/weapon=6058.1,head=7413 (item.style),
+// and a prismatic gem in an item: arms=8259~creators_light.
 function parseHash() {
-  const [id, rest = ''] = decodeURIComponent(location.hash.slice(1)).split('/'), worn = {};
-  for (const part of rest.split(',')) { const m = /^(\w+)=(\d+)(?:\.(\d+))?$/.exec(part); if (m) worn[m[1]] = [+m[2], +(m[3] || 0)]; }
-  return { id, worn };
+  const [id, rest = ''] = decodeURIComponent(location.hash.slice(1)).split('/'), worn = {}, gems = {};
+  for (const part of rest.split(',')) { const m = /^(\w+)=(\d+)(?:\.(\d+))?(?:~(\w+))?$/.exec(part); if (m) { worn[m[1]] = [+m[2], +(m[3] || 0)]; if (m[4]) gems[m[1]] = m[4]; } }
+  return { id, worn, gems };
 }
 function writeHash() {
-  const parts = Object.entries(state.worn).filter(([, w]) => w).map(([slot, [id, style]]) => `${slot}=${id}${style ? `.${style}` : ''}`);
+  const parts = Object.entries(state.worn).filter(([, w]) => w).map(([slot, [id, style]]) => `${slot}=${id}${style ? `.${style}` : ''}${state.gems[slot] ? `~${state.gems[slot]}` : ''}`);
   history.replaceState(null, '', `#${state.current.id}${parts.length ? `/${parts.join(',')}` : ''}`);
 }
 const RARITY = { common: '#b0c3d9', uncommon: '#5e98d9', rare: '#4b69ff', mythical: '#8847ff', legendary: '#d32ce6', immortal: '#e4ae39', arcana: '#ade55c', ancient: '#eb4b4b', seasonal: '#fff34f' };
@@ -219,13 +221,25 @@ const applies = (slot) => { const s = state.catalog?.slots.find((x) => x.name ==
 // What the address names that the catalog has (defaults are the hero's own: nothing to keep).
 const valid = (worn) => Object.fromEntries(Object.entries(worn).filter(([slot, [id]]) => { const it = state.catalog?.items[id]; return it && !it.default && it.slot === slot; }));
 
+// Prismatic gems: the palette (gems.json), and the gem in each slot's item while it takes one.
+const gemHex = (key) => state.palette.find((g) => g.key === key)?.hex || null;
+const takesGem = (slot) => { const w = state.worn[slot], it = w && state.catalog?.items[w[0]]; return !!(it && !it.default && it.prismatic); };
+function setGem(slot, key) {
+  if (key && takesGem(slot) && gemHex(key)) state.gems[slot] = key; else delete state.gems[slot];
+  viewer.gem(slot, gemHex(state.gems[slot]) || null); writeHash(); if (state.drawer) renderDrawer();
+}
+const applyGems = () => { for (const slot of Object.keys(state.gems)) if (takesGem(slot) && applies(slot)) viewer.gem(slot, gemHex(state.gems[slot])); else delete state.gems[slot]; };
+
 // Puts an item on (null or a default: the hero's own) and remembers it in the address.
 async function wear(slot, id, style = 0) {
   const it = id && state.catalog?.items[id];
+  // A gem stays in the item it was put in; another item comes without.
+  if (state.worn[slot]?.[0] !== +id) { delete state.gems[slot]; viewer.gem(slot, null); }
   state.worn[slot] = it && !it.default ? [+id, style] : null;
   if (formOf(state.worn) !== state.form) return reload();
   writeHash(); renderRail(); if (state.drawer) renderDrawer();
   await viewer.wear(slot, state.worn[slot] ? `items/${id}/` : null, style).catch((e) => console.error(e));
+  if (state.gems[slot]) viewer.gem(slot, gemHex(state.gems[slot]));
 }
 // What the address asks for, on the slots it names; the others go back to their defaults.
 function dress(worn) {
@@ -279,6 +293,13 @@ function renderDrawer() {
   const it = c.items[current], style = state.worn[which]?.[1] || 0;
   styles.hidden = !(it && it.styles.length > 1);
   if (!styles.hidden) styles.replaceChildren(el('span', { textContent: t().style }), ...it.styles.map((s, i) => { const b = el('button', { type: 'button', textContent: s.name?.[lang] || s.name?.en || String(i + 1) }); b.setAttribute('aria-pressed', i === style); b.onclick = () => wear(which, current, i); return b; }));
+  // A prismatic gem for what the slot wears, when it takes one.
+  const gems = $('[data-gems]'); gems.hidden = !(takesGem(which) && state.palette.length);
+  if (!gems.hidden) {
+    const now = state.gems[which] || null, label = el('span', { textContent: t().gem }); if (it.prismatic === 'tint') label.title = t().gemTint;
+    const none = el('button', { type: 'button', className: 'none', title: t().noGem }); none.setAttribute('aria-pressed', !now); none.onclick = () => setGem(which, null);
+    gems.replaceChildren(label, none, ...state.palette.map((g) => { const b = el('button', { type: 'button', title: g.name[lang] || g.name.en }); b.style.setProperty('--g', g.hex); b.setAttribute('aria-pressed', g.key === now); b.onclick = () => setGem(which, g.key); return b; }));
+  }
 }
 $('[data-drawer-close]').onclick = closeDrawer;
 $('[data-item-search]').addEventListener('input', (e) => { state.itemQuery = e.target.value; renderDrawer(); });
@@ -303,7 +324,13 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'ArrowLeft') viewer.rotate(-0.6, { relative: true });
   if (e.key === 'ArrowRight') viewer.rotate(0.6, { relative: true });
 });
-window.addEventListener('hashchange', () => { const { id, worn } = parseHash(); if (id === state.current?.id) dress(worn); else open(id); });
+window.addEventListener('hashchange', () => {
+  const { id, worn, gems } = parseHash(); if (id !== state.current?.id) return open(id);
+  dress(worn);
+  // The gems it names, in the items it names (those still loading take theirs when they are on).
+  for (const slot of new Set([...Object.keys(state.gems), ...Object.keys(gems)])) { if (gems[slot] && state.worn[slot]) state.gems[slot] = gems[slot]; else delete state.gems[slot]; viewer.gem(slot, gemHex(state.gems[slot]) || null); }
+  writeHash(); if (state.drawer) renderDrawer();
+});
 
 const dialog = $('[data-embed-dialog]');
 $('[data-embed]').onclick = () => {
@@ -335,6 +362,7 @@ new ResizeObserver(() => document.documentElement.style.setProperty('--plate-h',
 applyTexts();
 try {
   const response = await fetch('heroes/index.json'); state.index = await response.json(); state.heroes = state.index.heroes;
+  state.palette = await fetch('gems.json').then((r) => (r.ok ? r.json() : null)).then((g) => g?.prismatic || []).catch(() => []);
   applyTexts();
   await open(parseHash().id || 'nevermore');
   document.querySelector('.hero-link[aria-current="true"]')?.scrollIntoView({ block: 'center' });

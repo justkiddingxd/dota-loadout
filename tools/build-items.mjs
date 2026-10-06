@@ -9,6 +9,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { join, resolve } from 'node:path';
 import { readGlb } from './lib/files.mjs';
 import { loadCosmetics, loadGame } from './lib/game.mjs';
+import { prismaticColors, takesPrismatic } from './lib/gems.mjs';
 import { buildItem } from './lib/item.mjs';
 
 const args = process.argv.slice(2), opt = (name, fallback) => { const i = args.indexOf(`--${name}`); return i < 0 ? fallback : args[i + 1]; }, flag = (name) => args.includes(`--${name}`);
@@ -19,6 +20,8 @@ const CACHE = resolve('.cache');
 const NOT_WORN = /taunt|voice|ability_effects|effigy|costume|ward|courier|loading_screen|announcer|music|hud|cursor|weather|terrain|emblem|multikill|streak|death_effects/;
 
 const { heroes } = loadGame(game), cosmetics = loadCosmetics(game);
+// The prismatic gems' colours, for the items that take one.
+writeFileSync(join(out, 'gems.json'), JSON.stringify({ version: 1, prismatic: prismaticColors(game) }));
 const list = heroes.filter((h) => !only.length || only.includes(h.id));
 for (const hero of list) {
   const heroDir = join(out, 'heroes', hero.id), c = cosmetics.get(hero.npc);
@@ -55,6 +58,7 @@ for (const hero of list) {
     version: 1,
     slots: c.slots.filter((s) => ok.some((i) => i.slot === s.name)).map((s) => ({ name: s.name, text: s.text, ...(/_persona_(\d+)$/.test(s.name) ? { persona: +/_persona_(\d+)$/.exec(s.name)[1] } : {}), items: ok.filter((i) => i.slot === s.name).sort((a, b) => b.default - a.default || b.id - a.id).map((i) => i.id) })),
     items: Object.fromEntries(ok.map((i) => [i.id, { name: i.name, slot: i.slot, rarity: i.rarity, default: i.default || undefined, set: i.set || undefined,
+      prismatic: (!i.default && takesPrismatic(manifests[i.id])) || undefined,
       styles: manifests[i.id].styles.map((s) => ({ name: s.name, icon: s.icon, ...(s.form ? { form: s.form } : {}) })) }])),
     sets: c.sets.map((s) => ({ ...s, items: s.items.filter((id) => manifests[id]) })).filter((s) => s.items.length > 1),
   };
