@@ -43,6 +43,7 @@ new HeroViewer(canvas, {
   wheel: 'zoom',       // 'zoom', 'turn' or false
   framing: 'hero',     // 'hero' (fit the hero) or 'full' (hero and pedestal whole)
   pixelRatio: 2,
+  textureScale: 1,     // 0.5 by default on phones and machines of 4 GB or less: a quarter of the GPU memory
   onProgress: (loaded, total) => {},
   onAnimation: (name) => {},
 });

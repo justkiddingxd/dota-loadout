@@ -365,7 +365,9 @@ try {
   state.palette = await fetch('gems.json').then((r) => (r.ok ? r.json() : null)).then((g) => g?.prismatic || []).catch(() => []);
   applyTexts();
   await open(parseHash().id || 'nevermore');
-  document.querySelector('.hero-link[aria-current="true"]')?.scrollIntoView({ block: 'center' });
+  // The roster scrolls to the hero within itself; on a phone (one long page) the stage stays in view.
+  const list = $('[data-list]'), cur = document.querySelector('.hero-link[aria-current="true"]');
+  if (cur && list.scrollHeight > list.clientHeight) list.scrollTop = cur.offsetTop - list.offsetTop - list.clientHeight / 2;
 } catch (e) {
   $('[data-status-text]').textContent = t().failed; $('[data-status]').classList.add('error'); console.error(e);
 }

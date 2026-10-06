@@ -28,9 +28,13 @@ const tint = (c, scale) => new THREE.Color().setRGB(...c.map((v) => v / 255), TH
 export class HeroViewer {
   // options: controls — true (drag anywhere), 'hero' (only a drag that starts on the hero; the rest
   // goes on to the page) or false; wheel — 'zoom', 'turn' or false; framing — 'hero' (the hero,
-  // with what fits of the pedestal) or 'full' (hero and pedestal whole); pixelRatio; onProgress(loaded, total); onAnimation(name).
+  // with what fits of the pedestal) or 'full' (hero and pedestal whole); pixelRatio; textureScale (1, or
+  // 0.5 by default on phones and machines of 4 GB or less); onProgress(loaded, total); onAnimation(name).
   constructor(canvas, options = {}) {
     this.canvas = canvas; this.options = { controls: true, wheel: 'zoom', framing: 'hero', ...options };
+    // Phones and small machines get textures at half size: a quarter of the memory, unseen on their screens.
+    const small = globalThis.matchMedia?.('(pointer: coarse)').matches || (globalThis.navigator?.deviceMemory && navigator.deviceMemory <= 4);
+    this.textureScale = this.options.textureScale ?? (small ? 0.5 : 1);
     const renderer = this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, alpha: true, premultipliedAlpha: true, powerPreference: 'high-performance' });
     renderer.setPixelRatio(Math.min(this.options.pixelRatio ?? globalThis.devicePixelRatio ?? 1, 2)); renderer.outputColorSpace = THREE.SRGBColorSpace; renderer.setClearColor(0x000000, 0);
     renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFShadowMap;
@@ -73,7 +77,7 @@ void main() {
     const { manifest, url } = typeof source === 'string' ? await fetchHero(source) : source;
     if (ticket !== this.loading) return null;
     const manager = new THREE.LoadingManager(); manager.onProgress = (_, loaded, total) => this.options.onProgress?.(loaded, total);
-    const hero = await buildHero(manifest, url, manager, this.time, this.light);
+    const hero = await buildHero(manifest, url, manager, this.time, this.light, this.textureScale);
     // Textures load in the background; the hero shows once they are all in.
     await new Promise((done) => { if (!manager.itemsTotal || manager.itemsLoaded >= manager.itemsTotal) done(); else { manager.onLoad = done; manager.onError = () => {}; } });
     if (ticket !== this.loading) { hero.dispose(); return null; }
@@ -189,8 +193,14 @@ async function fetchJson(base, file) {
 const fetchHero = (base) => fetchJson(base, 'hero.json');
 
 // ---------------------------------------------------------------- one hero
-async function buildHero(manifest, url, manager, time, light) {
-  const made = [], textureOf = (loader, address) => (file, srgb = false) => { const t = loader.load(address(`textures/${file}`)); t.flipY = false; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace; t.anisotropy = 4; made.push(t); return t; };
+// Textures at a scale below 1 are shrunk once loaded, before they reach the GPU (a phone's memory).
+const shrink = (scale) => (scale >= 1 ? undefined : (t) => {
+  const img = t.image; if (!img?.width || Math.max(img.width, img.height) <= 64) return;
+  const c = document.createElement('canvas'); c.width = Math.max(1, Math.round(img.width * scale)); c.height = Math.max(1, Math.round(img.height * scale));
+  c.getContext('2d').drawImage(img, 0, 0, c.width, c.height); t.image = c; t.needsUpdate = true;
+});
+async function buildHero(manifest, url, manager, time, light, textureScale = 1) {
+  const made = [], textureOf = (loader, address) => (file, srgb = false) => { const t = loader.load(address(`textures/${file}`), shrink(textureScale)); t.flipY = false; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace; t.anisotropy = 4; made.push(t); return t; };
   const texture = textureOf(new THREE.TextureLoader(manager), url);
   // Cube maps from their strip of faces (+X −X +Y −Y +Z −Z in the game's axes), one of each.
   const cubes = new Map();
@@ -327,7 +337,7 @@ async function buildHero(manifest, url, manager, time, light) {
     },
   };
   // Items' particle textures come with full addresses.
-  const lib = new Library({ systems: manifest.systems || {}, textures: manifest.textures || {}, snapshots: manifest.snapshots || {}, url: (file) => (/^[a-z]+:/.test(file) ? file : url(`fx/${file}`)), models: fxModels });
+  const lib = new Library({ systems: manifest.systems || {}, textures: manifest.textures || {}, snapshots: manifest.snapshots || {}, url: (file) => (/^[a-z]+:/.test(file) ? file : url(`fx/${file}`)), models: fxModels, options: { onTexture: shrink(textureScale) } });
   lib.loader.manager = manager;
   // Attachments by model: the hero's, and those of what each slot wears.
   const attachments = { ...manifest.attachments };

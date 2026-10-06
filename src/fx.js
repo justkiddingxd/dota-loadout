@@ -1605,7 +1605,8 @@ export class Library {
     const path = r.m_vecTexturesInput?.[0]?.m_hTexture || r.m_hTexture || 'materials/particle/particle_glow_05.vtex';
     const raw = r.m_nOutputBlendMode === 'PARTICLE_OUTPUT_BLEND_MODE_MOD2X', key = raw ? `${path}#raw` : path;
     if (!this.cache.has(key)) {
-      const info = this.textures[path], t = info ? this.loader.load(this.url(info.file)) : null;
+      // options.onTexture: a texture once loaded (the viewer shrinks them on phones).
+      const info = this.textures[path], t = info ? this.loader.load(this.url(info.file), this.options.onTexture) : null;
       if (t) { t.colorSpace = raw ? THREE.NoColorSpace : THREE.SRGBColorSpace; t.flipY = false; t.wrapS = t.wrapT = THREE.RepeatWrapping; }
       this.cache.set(key, { texture: t, info });
     }
