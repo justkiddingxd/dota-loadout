@@ -112,8 +112,24 @@ function mapping(d) {
     case 'PF_MAP_TYPE_MULT': { const m = d.m_flMultFactor ?? 0; return (x) => x * m; }
     case 'PF_MAP_TYPE_REMAP': { let [i0, i1, o0, o1] = [d.m_flInput0 ?? 0, d.m_flInput1 ?? 0, d.m_flOutput0 ?? 0, d.m_flOutput1 ?? 0]; if (i0 > i1) [i0, i1, o0, o1] = [i1, i0, o1, o0];
       return (x) => (i0 === i1 ? (x >= i1 ? o1 : o0) : remapClamped(x, i0, i1, o0, o1)); }
+    case 'PF_MAP_TYPE_CURVE': return curve(d.m_Curve, d.m_nInputMode === 'PF_INPUT_MODE_LOOPED');
     default: return (x) => x;
   }
+}
+// A piecewise curve: Hermite between its keys with their slopes, the end keys' values beyond them
+// (Marci's taunt basket grows to size 1 in 0.1 s and stays so); a looped input wraps in the domain.
+function curve(c, looped) {
+  const keys = c?.m_spline || []; if (!keys.length) return (x) => x;
+  const d0 = c.m_vDomainMins?.[0] ?? 0, d1 = c.m_vDomainMaxs?.[0] ?? 0, span = d1 - d0;
+  return (x) => {
+    if (looped && span > 0) x = d0 + ((((x - d0) % span) + span) % span);
+    if (x <= keys[0].x) return keys[0].y;
+    const last = keys[keys.length - 1]; if (x >= last.x) return last.y;
+    let i = 0; while (keys[i + 1].x < x) i++;
+    const a = keys[i], b = keys[i + 1], h = b.x - a.x; if (h <= 0) return b.y;
+    const t = (x - a.x) / h, t2 = t * t, t3 = t2 * t;
+    return (2 * t3 - 3 * t2 + 1) * a.y + (t3 - 2 * t2 + t) * h * (a.m_flSlopeOutgoing ?? 0) + (-2 * t3 + 3 * t2) * b.y + (t3 - t2) * h * (b.m_flSlopeIncoming ?? 0);
+  };
 }
 function vector(d, def = [0, 0, 0]) {
   if (d === undefined || d === null) { const v = vec(def); return () => v; }
@@ -134,6 +150,8 @@ function transform(d, cpDefault = 0) {
 
 // ---------------------------------------------------------------- functions
 const endcapSkip = (d) => d.m_nOpEndCapState === 'PARTICLE_ENDCAP_ENDCAP_ON';
+// When an operator runs: always, only in the end cap (after the effect is stopped), or only before it.
+const endcapState = (d) => ({ PARTICLE_ENDCAP_ENDCAP_ON: true, PARTICLE_ENDCAP_ENDCAP_OFF: false })[d.m_nOpEndCapState] ?? null;
 // ParticleFunction.GetOperatorRunStrength: m_flOpStrength times the operator's fade-in/out window.
 function strength(d) {
   const inS = d.m_flOpStartFadeInTime ?? 0, inE0 = d.m_flOpEndFadeInTime ?? 0, outS0 = d.m_flOpStartFadeOutTime ?? 0, outE0 = d.m_flOpEndFadeOutTime ?? 0, period = d.m_flOpFadeOscillatePeriod ?? 0;
@@ -573,10 +591,14 @@ const OP = {
     return (ps, dt, s, str) => { for (const p of ps) { const ax = a0.clone().lerp(a1, hash(p.uid, 61)).normalize(), q = new THREE.Quaternion().setFromAxisAngle(ax, lerp(r0, r1, hash(p.uid, 62)) * Math.PI / 180 * dt * str); const v = p.getV(out).applyQuaternion(q); if (normalize) v.normalize(); } };
   },
   C_OP_SetVec(d) { const v = vector(d.m_InputValue), out = field(d.m_nOutputField, F.Color); return (ps, dt, s) => { for (const p of ps) p.setV(out, v(p, s).clone()); }; },
-  // Lights, end caps (the effect's end, not played here), speed-to-CP links: nothing to draw.
+  // The end cap (the effect stopped): its particles go after a time, a value going to another first.
+  C_OP_EndCapTimedDecay(d) { const time = d.m_flDecayTime ?? 1; return (ps, dt, s) => { if (s.age - s.endedAt >= time) for (const p of ps) p.dead = true; }; },
+  C_OP_LerpEndCapScalar(d) {
+    const out = field(d.m_nFieldOutput, F.Alpha), to = d.m_flOutput ?? 1, time = d.m_flLerpTime ?? 1;
+    return (ps, dt, s) => { const k = time > 0 ? saturate((s.age - s.endedAt) / time) : 1; for (const p of ps) { p.capFrom ??= p.getS(out); p.setS(out, lerp(p.capFrom, to, k)); } };
+  },
+  // Lights, speed-to-CP links: nothing to draw.
   C_OP_RemapSpeedtoCP: () => () => {},
-  C_OP_EndCapTimedDecay: () => () => {},
-  C_OP_LerpEndCapScalar: () => () => {},
   C_OP_RemapSpeed: () => () => {},
   C_OP_SelectivelyEnableChildren: () => () => {},
   C_OP_RenderDeferredLight: () => () => {},
@@ -634,7 +656,7 @@ export class Simulation {
     this.maxStep = def.m_flMaximumTimeStep ?? 0.1;
     this.preSim = def.m_flPreSimulationTime ?? 0;
     this.groupId = def.m_nGroupID ?? 0;
-    const build = (list, table) => (list || []).filter((d) => !d.m_bDisableOperator && !endcapSkip(d)).map((d) => { const f = table[d._class]; if (!f) { lib.unsupported.add(d._class); return null; } const fn = f(d); return fn ? { fn, strength: strength(d) } : null; }).filter(Boolean);
+    const build = (list, table) => (list || []).filter((d) => !d.m_bDisableOperator).map((d) => { const f = table[d._class]; if (!f) { lib.unsupported.add(d._class); return null; } const fn = f(d); return fn ? { fn, strength: strength(d), endcap: endcapState(d) } : null; }).filter(Boolean);
     this.pre = build(def.m_PreEmissionOperators, OP);
     this.emitters = build(def.m_Emitters, EMIT);
     // Initializers keep their definition index and the fields they write: below behaviour version 6
@@ -654,8 +676,9 @@ export class Simulation {
     }
     this.delay = 0; this.stopped = false;
   }
-  // No more particles from here on (the effect's animation ended): those alive live out their lives.
-  stopEmission() { for (const sim of this.all()) sim.stopped = true; }
+  // No more particles from here on (the effect's animation ended): those alive live out their lives,
+  // with the operators of the end cap.
+  stopEmission() { for (const sim of this.all()) if (!sim.stopped) { sim.stopped = true; sim.state.endedAt = sim.state.age; } }
   get finished() { return this.stopped && this.count() === 0; }
   // Takes this system's meshes out of the scene (an effect that has run its course).
   dispose() { for (const sim of this.all()) for (const r of sim.renderers) r.dispose(); }
@@ -683,9 +706,10 @@ export class Simulation {
   step(dt) {
     const s = this.state; this.dt = dt; s.age += dt;
     for (const p of this.particles) p.age = s.age - p.created;
-    for (const o of this.pre) { const k = o.strength(s); if (k > 0) o.fn(this.particles, dt, s, k); }
-    if (!this.stopped) for (const e of this.emitters) e.fn.emit(dt, s, (age) => this.emit(age));
-    for (const o of this.ops) { const k = o.strength(s); if (k > 0) o.fn(this.particles, dt, s, k); }
+    const runs = (o) => o.endcap === null || o.endcap === this.stopped;
+    for (const o of this.pre) { if (!runs(o)) continue; const k = o.strength(s); if (k > 0) o.fn(this.particles, dt, s, k); }
+    if (!this.stopped) for (const e of this.emitters) if (runs(e)) e.fn.emit(dt, s, (age) => this.emit(age));
+    for (const o of this.ops) { if (!runs(o)) continue; const k = o.strength(s); if (k > 0) o.fn(this.particles, dt, s, k); }
     if (this.particles.some((p) => p.dead)) this.particles = this.particles.filter((p) => !p.dead);
     this.particles.forEach((p, i) => { p.index = i; });
     s.prevDt = dt;

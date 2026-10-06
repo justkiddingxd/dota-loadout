@@ -356,8 +356,10 @@ async function buildHero(manifest, url, manager, time, light) {
       for (const e of effects) drive(e, origin);
       for (const e of live) drive(e, origin);
       for (const e of [...effects, ...live]) e.sim.update(dt);
-      // Spent effects go: stopped and empty, killed, or long past (a stray endless one).
+      // Spent effects go: stopped and empty, killed, or long past (a stray endless one). One that
+      // outlives its animation by a second is stopped (Marci's taunt basket, which no event stops).
       for (let i = live.length - 1; i >= 0; i--) { const e = live[i]; e.born += dt;
+        e.over = e.sequence === currentName ? 0 : (e.over || 0) + dt; if (e.over > 1) e.sim.stopEmission();
         if (e.kill || e.sim.finished || e.born > 20 || (e.born > 0.5 && e.sim.count() === 0 && e.sequence !== currentName)) { e.sim.dispose(); live.splice(i, 1); } }
       for (const e of [...effects, ...live]) e.sim.render(camera, groupInverse);
     },
