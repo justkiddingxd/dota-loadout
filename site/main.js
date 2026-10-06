@@ -105,7 +105,7 @@ function renderHero(h) {
   document.body.dataset.attr = h.attribute;
   document.title = `${nameOf(h)} — Loadout`;
   $('[data-attr-name]').textContent = t().attrs[h.attribute]; $('[data-attr-icon]').src = `attributes/${h.attribute}.webp`;
-  $('[data-switch-icon]').src = `heroes/${h.id}/icon.webp`; $('[data-switch-name]').textContent = nameOf(h);
+  $('[data-switch-icon]').src = `heroes/${h.id}/portrait.webp`; $('[data-switch-name]').textContent = nameOf(h);
   $('[data-roles]').textContent = h.roles.map((r) => t().roles[r] || r).join(', ');
   $('[data-num]').textContent = num(h);
   $('[data-name]').textContent = nameOf(h);
@@ -211,6 +211,10 @@ function writeHash() {
   history.replaceState(null, '', `#${state.current.id}${parts.length ? `/${parts.join(',')}` : ''}`);
 }
 const RARITY = { common: '#b0c3d9', uncommon: '#5e98d9', rare: '#4b69ff', mythical: '#8847ff', legendary: '#d32ce6', immortal: '#e4ae39', arcana: '#ade55c', ancient: '#eb4b4b', seasonal: '#fff34f' };
+// The game's order of rarities, for a set's: its rarest item's.
+const RANK = ['common', 'uncommon', 'rare', 'mythical', 'legendary', 'ancient', 'immortal', 'arcana', 'seasonal'];
+const RARITY_NAME = { ru: { common: 'Обычный', uncommon: 'Необычный', rare: 'Редкий', mythical: 'Мифический', legendary: 'Легендарный', immortal: 'Бессмертный', arcana: 'Аркана', ancient: 'Древний', seasonal: 'Сезонный' }, en: {} };
+const rarityName = (r) => RARITY_NAME[lang][r] || r.charAt(0).toUpperCase() + r.slice(1);
 const itemName = (it) => it.name[lang] || it.name.en;
 // A style without an icon of its own shows the item's.
 const iconOf = (id, style = 0) => { const it = state.catalog?.items[id], icon = it?.styles[style]?.icon || it?.styles.find((s) => s.icon)?.icon; return icon ? `items/${id}/${icon}` : null; };
@@ -291,7 +295,7 @@ function slotRow(s) {
   const id = shownIn(s.name), it = id && state.catalog.items[id], open = state.open === s.name, w = state.worn[s.name];
   const head = el('button', { type: 'button', className: 'slot-head' },
     el('span', { className: 'thumb' }, iconOf(id, w?.[1]) ? el('img', { src: iconOf(id, w?.[1]), alt: '', loading: 'lazy' }) : null),
-    el('span', { className: 'what' }, el('small', { textContent: slotName(s) }), el('b', { textContent: it ? itemName(it) : '—' })),
+    el('span', { className: 'what' }, el('small', { textContent: slotName(s) }), el('b', { textContent: it ? itemName(it) : '—' }), it && !it.default ? el('small', { className: 'rarity', textContent: rarityName(it.rarity) }) : null),
     el('span', { className: 'marks' }, state.unusual[s.name] ? el('i', { className: 'mark unusual', title: t().unusual }) : null, state.gems[s.name] ? el('i', { className: 'mark gem', style: `--g: ${gemHex(state.gems[s.name])}`, title: t().gem }) : null, el('span', { className: 'count', textContent: String(s.items.length) })));
   head.setAttribute('aria-expanded', open); head.onclick = () => { state.open = open ? null : s.name; state.itemQuery = ''; renderWardrobe(); if (!open) requestAnimationFrame(() => $('.slot.open')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })); };
   const row = el('section', { className: `slot${open ? ' open' : ''}${w ? ' changed' : ''}` }, head);
@@ -331,7 +335,11 @@ function options(label, list, kind = '') {
 }
 function setRow(set) {
   const c = state.catalog, on = set.items.every((id) => state.worn[c.items[id].slot]?.[0] === id);
-  const b = el('button', { type: 'button', className: `set${on ? ' on' : ''}` }, el('span', { className: 'icons' }, ...set.items.map((id) => el('img', { src: iconOf(id) || '', alt: '', loading: 'lazy' }))), el('b', { textContent: set.name?.[lang] || set.name?.en || set.key }));
+  const rarity = set.items.map((id) => c.items[id].rarity).sort((a, b) => RANK.indexOf(b) - RANK.indexOf(a))[0] || 'common';
+  const b = el('button', { type: 'button', className: `set${on ? ' on' : ''}` },
+    el('span', { className: 'set-head' }, el('b', { textContent: set.name?.[lang] || set.name?.en || set.key }), el('small', { className: 'rarity', textContent: rarityName(rarity) })),
+    el('span', { className: 'icons' }, ...set.items.map((id) => el('img', { src: iconOf(id) || '', alt: '', loading: 'lazy' }))));
+  b.style.setProperty('--r', RARITY[rarity]);
   b.onclick = () => { const worn = { ...state.worn }; for (const id of set.items) worn[c.items[id].slot] = [id, 0]; dress(worn); renderWardrobe(); };
   return b;
 }
