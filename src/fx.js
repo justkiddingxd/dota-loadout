@@ -1354,7 +1354,7 @@ export class Simulation {
     this.constraints = build(def.m_Constraints, OP);
     this.passes = this.constraints.length ? Math.max(1, ...(def.m_Operators || []).filter((o) => o._class === 'C_OP_BasicMovement' && !o.m_bDisableOperator).map((o) => o.m_nMaxConstraintPasses ?? 3)) : 1;
     // A renderer has a strength too: at 0 it draws nothing (Ravenblight's CP 2 picks its feathers' material).
-    this.renderers = (def.m_Renderers || []).filter((r) => !r.m_bDisableOperator).map((r) => { const x = lib.renderer(r, this); if (x && r.m_flOpStrength !== undefined) x.strength = strength(r); return x; }).filter(Boolean);
+    this.renderers = (def.m_Renderers || []).filter((r) => !r.m_bDisableOperator).map((r) => { const x = lib.renderer(r, this); if (x) x.colorScale = colorScale(r); if (x && r.m_flOpStrength !== undefined) x.strength = strength(r); return x; }).filter(Boolean);
     this.snapshot = def.m_hSnapshot ? lib.snapshot(def.m_hSnapshot) : null; if (this.snapshot) this.snapshot.sim = this;
     for (const c of def.m_Children || []) {
       if (c.m_bEndCap || c.m_bDisableChild) continue;
@@ -1429,22 +1429,33 @@ varying vec4 vColor; varying vec2 vUvA; varying vec2 vUvB; varying float vBlend;
 void main() { vColor = color; vUvA = mix(uvA.xy, uvA.zw, uv); vUvB = mix(uvB.xy, uvB.zw, uv); vBlend = blend; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`;
 const fragmentShader = `
 uniform sampler2D map; uniform float overbright; uniform float addSelf; uniform bool saturateColor; uniform int mode; uniform bool blendFrames;
+uniform sampler2D tSceneDepth; uniform vec2 uSceneSize; uniform float uNear, uFar, uFeather; uniform bool uSoft;
 varying vec4 vColor; varying vec2 vUvA; varying vec2 vUvB; varying float vBlend;
+float viewDepth(float d) { float z = d * 2.0 - 1.0; return 2.0 * uNear * uFar / (uFar + uNear - z * (uFar - uNear)); }
 void main() {
   vec4 t = texture2D(map, vUvA); if (blendFrames) t = mix(t, texture2D(map, vUvB), vBlend);
   vec3 c = vColor.rgb * t.rgb; float a = t.a * vColor.a;
+  // Depth feathering: the card fades where it meets what lies behind it (a glow on an item lights its
+  // outline and leaves the item seen through it, as in the game).
+  if (uSoft && uFeather > 0.0) a *= clamp((viewDepth(texture2D(tSceneDepth, gl_FragCoord.xy / uSceneSize).x) - viewDepth(gl_FragCoord.z)) / uFeather, 0.0, 1.0);
   if (mode == 5) { vec3 m = mix(vec3(0.5), mix(vec3(0.5), c, vColor.rgb), vec3(a)); gl_FragColor = vec4(clamp(m, 0.0, 1.0), a); return; }
   c *= overbright; if (saturateColor) c = clamp(c, 0.0, 1.0); c *= addSelf;
   gl_FragColor = vec4(c * a, mode == 1 ? 0.0 : a);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
 }`;
+// The scene's depth without the effects, for depth feathering: the viewer renders it each frame and
+// sets these (shared by every particle material); off, nothing fades.
+export const SOFT = { tSceneDepth: { value: null }, uSceneSize: { value: new THREE.Vector2(1, 1) }, uNear: { value: 0.1 }, uFar: { value: 100 }, uSoft: { value: false } };
+// How near (game units) a feathered card fades out where nothing is set (the usual authored distance).
+const FEATHER = 6;
 function material(tex, r) {
   const mode = r.m_nOutputBlendMode === 'PARTICLE_OUTPUT_BLEND_MODE_ADD' ? 1 : r.m_nOutputBlendMode === 'PARTICLE_OUTPUT_BLEND_MODE_MOD2X' ? 5 : 0;
+  const feather = /ON_/.test(r.m_nFeatheringMode || '') ? number(r.m_flFeatheringMaxDist, FEATHER)(null, null) * 0.0254 : 0;
   const m = new THREE.ShaderMaterial({
     vertexShader, fragmentShader, transparent: true, depthWrite: false, side: THREE.DoubleSide,
     uniforms: { map: { value: tex }, overbright: { value: number(r.m_flOverbrightFactor, 1)(null, null) }, addSelf: { value: 1 + number(r.m_flAddSelfAmount, 0)(null, null) },
-      saturateColor: { value: r.m_bSaturateColorPreAlphaBlend !== false }, mode: { value: mode }, blendFrames: { value: r.m_bBlendFramesSeq0 !== false } },
+      saturateColor: { value: r.m_bSaturateColorPreAlphaBlend !== false }, mode: { value: mode }, blendFrames: { value: r.m_bBlendFramesSeq0 !== false }, ...SOFT, uFeather: { value: feather } },
   });
   // Mod2x: colour = 2 × source × destination, so 50 % grey changes nothing. The canvas's alpha must
   // stay as it is: blended like the colour, it fell to 2 × a × alpha, and the sprite's whole square
@@ -1494,7 +1505,9 @@ function sheetFrame(info, p, rate, type) {
   return null;
 }
 // A sprite's texture when it names none, and in place of one the game lacks (a broader glow).
-const GLOW = 'materials/particle/particle_glow_05.vtex', SOFT_GLOW = 'materials/particle/particle_glow_01.vtex';
+const GLOW = 'materials/particle/particle_glow_05.vtex', SOFT_GLOW = 'materials/particle/particle_glow_01.vtex', SMOKE = 'materials/particle/smoke1/smoke1.vtex';
+// What stands in for a texture the game lacks: smoke for smoke (a glow would be a solid cloud), else a glow.
+const standIn = (path) => (/smoke/.test(path) ? SMOKE : SOFT_GLOW);
 const FULL = [0, 0, 1, 1], Z = new THREE.Vector3(0, 0, 1);
 // Screen-facing basis in the particle space, from the camera.
 function billboard(camera, groupInverse) {
@@ -1503,6 +1516,10 @@ function billboard(camera, groupInverse) {
   const eye = new THREE.Vector3().setFromMatrixPosition(camera.matrixWorld).applyMatrix4(groupInverse);
   return { right, up, eye };
 }
+// m_vecColorScale: a renderer's own tint over its particles' colour (Featherfall's white rim drawn
+// red, its smoke pink, its shadow dark grey). Without one, the colour as it is.
+const colorScale = (r) => { if (!r.m_vecColorScale) return null; const v = vector(r.m_vecColorScale, [1, 1, 1]); return (p, s) => v(p, s); };
+const scaled = (k, p, s) => { const c = p.color; if (!k) return [c.x, c.y, c.z]; const m = k(p, s); return [c.x * m.x, c.y * m.y, c.z * m.z]; };
 class SpriteRenderer {
   dispose() { this.batch.dispose(); }
   constructor(r, lib, sim) {
@@ -1512,9 +1529,6 @@ class SpriteRenderer {
     // Cards lying in a plane fade as they turn edge-on to the eye: full where the dot of their normal
     // and the way to the eye is the start one, gone at the end one (the defaults, 1 and 2, never fade).
     this.dotStart = r.m_flStartFadeDot ?? 1; this.dotEnd = r.m_flEndFadeDot ?? 2;
-    // Depth bias: the card drawn nearer the eye by that much (negative) so the model it lies on does
-    // not cut it — a glow round an item stays whole over it.
-    this.bias = typeof r.m_flDepthBias === 'number' ? r.m_flDepthBias : 0;
   }
   update(ps, s, camera, gi) {
     const b = this.batch, { right, up, eye } = billboard(camera, gi); b.begin();
@@ -1533,7 +1547,6 @@ class SpriteRenderer {
       const c = Math.cos(p.rot.z), sn = Math.sin(p.rot.z), rr = R.clone().multiplyScalar(c).addScaledVector(U, sn).multiplyScalar(r), uu = U.clone().multiplyScalar(c).addScaledVector(R, -sn).multiplyScalar(r);
       // Sheet frames are cropped to their content: the card shrinks to the crop window, as in the game.
       const o = p.pos.clone(), f = sheetFrame(this.info, p, this.rate, this.type);
-      if (this.bias) { const toEye = eye.clone().sub(o), d = toEye.length(); if (d > 1e-3) o.addScaledVector(toEye, Math.min(-this.bias, d * 0.9) / d); }
       let uvA = FULL, uvB = FULL;
       if (f) {
         const win = (fr) => { const [u0, v0, u1, v1] = fr.uv, [c0, d0, c1, d1] = fr.crop || fr.uv, w = u1 - u0 || 1, h = v1 - v0 || 1; return [(c0 - u0) / w, (d0 - v0) / h, (c1 - u0) / w, (d1 - v0) / h]; };
@@ -1542,7 +1555,8 @@ class SpriteRenderer {
         o.addScaledVector(rr, W[2] + W[0] - 1).addScaledVector(uu, 1 - W[1] - W[3]); rr.multiplyScalar(W[2] - W[0]); uu.multiplyScalar(W[3] - W[1]);
         uvA = rect(f.fa); uvB = rect(f.fb);
       }
-      b.quad([o.clone().sub(rr).sub(uu), o.clone().sub(rr).add(uu), o.clone().add(rr).add(uu), o.clone().add(rr).sub(uu)], [p.color.x * fade, p.color.y * fade, p.color.z * fade, a], uvA, uvB, f ? f.t : 0);
+      const [cr, cg, cb] = scaled(this.colorScale, p, s);
+      b.quad([o.clone().sub(rr).sub(uu), o.clone().sub(rr).add(uu), o.clone().add(rr).add(uu), o.clone().add(rr).sub(uu)], [cr * fade, cg * fade, cb * fade, a], uvA, uvB, f ? f.t : 0);
     }
     b.end();
   }
@@ -1567,7 +1581,7 @@ class TrailRenderer {
       let U = dir.clone().cross(eye.clone().sub(p.pos)); if (U.lengthSq() < 1e-8) U = dir.clone().cross(new THREE.Vector3(0, 0, 1)); U.normalize().multiplyScalar(hw);
       const f = sheetFrame(this.info, p, this.rate, this.type); let uv = f ? f.a : FULL, uv2 = f ? f.b : FULL;
       if (this.flipV) { uv = [uv[0], uv[3], uv[2], uv[1]]; uv2 = [uv2[0], uv2[3], uv2[2], uv2[1]]; }
-      const head = [p.color.x, p.color.y, p.color.z, a * this.head(p, s)], tail = [p.color.x, p.color.y, p.color.z, a * this.tail(p, s)];
+      const c = scaled(this.colorScale, p, s), head = [...c, a * this.head(p, s)], tail = [...c, a * this.tail(p, s)];
       // Corners (uv 0,1)(0,0)(1,0)(1,1): V runs from the head (1) to the tail (0), U across.
       b.quad([center.clone().sub(U).sub(V), center.clone().sub(U).add(V), center.clone().add(U).add(V), center.clone().add(U).sub(V)], [head, tail, tail, head], uv, uv2, f ? f.t : 0);
     }
@@ -1587,7 +1601,7 @@ class RopeRenderer {
       const p = pts[i], q = pts[i + 1], dir = q.pos.clone().sub(p.pos), len = dir.length(); if (len < 1e-4) continue; dir.divideScalar(len);
       const sp = dir.clone().cross(eye.clone().sub(p.pos)).normalize().multiplyScalar(p.radius * this.radiusScale(p, s)), sq = dir.clone().cross(eye.clone().sub(q.pos)).normalize().multiplyScalar(q.radius * this.radiusScale(q, s));
       const v2 = v + len / this.vWorld;
-      b.quad([p.pos.clone().sub(sp), q.pos.clone().sub(sq), q.pos.clone().add(sq), p.pos.clone().add(sp)], [p.color.x, p.color.y, p.color.z, (p.alpha + q.alpha) / 2], [0, v2, 1, v], [0, v2, 1, v], 0);
+      b.quad([p.pos.clone().sub(sp), q.pos.clone().sub(sq), q.pos.clone().add(sq), p.pos.clone().add(sp)], [...scaled(this.colorScale, p, s), (p.alpha + q.alpha) / 2], [0, v2, 1, v], [0, v2, 1, v], 0);
       v = v2;
     }
     b.end();
@@ -1600,6 +1614,8 @@ const GLTF_TO_SOURCE = SOURCE_TO_GLTF.clone().invert();
 class ModelRenderer {
   constructor(r, lib, sim) {
     this.lib = lib; this.list = (r.m_ModelList || []).map((m) => m.m_model).filter(Boolean); this.activity = r.m_ActivityName || null; this.animated = r.m_bAnimated;
+    // The material the renderer draws the model in instead of its own (by name, as the build keys them).
+    this.override = r.m_hOverrideMaterial ? r.m_hOverrideMaterial.split('/').pop().replace(/\.vmat$/, '') : null;
     this.rate = (r.m_flAnimationRate ?? 30) / 30; this.instances = new Map(); this.free = [];
   }
   update(ps, s) {
@@ -1609,12 +1625,13 @@ class ModelRenderer {
       // A model of one gone is taken again before a new one is made (feathers come and go by the hundred).
       if (!inst) { const path = this.list[p.uid % Math.max(1, this.list.length)], i = this.free.findIndex((f) => f.path === path); if (i >= 0) { inst = this.free.splice(i, 1)[0]; inst.scene.visible = true; inst.mixer?.setTime(0); this.instances.set(p, inst); } }
       if (!inst) {
-        const path = this.list[p.uid % Math.max(1, this.list.length)], m = this.lib.models.get(path, this.activity, s.sim.def._path); if (!m) continue;
+        const path = this.list[p.uid % Math.max(1, this.list.length)], m = this.lib.models.get(path, this.activity, s.sim.def._path, this.override); if (!m) continue;
         const mixer = this.animated && m.clip ? new THREE.AnimationMixer(m.scene) : null; if (mixer) mixer.clipAction(m.clip).play();
         m.scene.matrixAutoUpdate = false; this.lib.group.add(m.scene); inst = { path, scene: m.scene, mixer, materials: m.materials || [] }; this.instances.set(p, inst);
       }
       // The particle's colour tints the model; its alpha fades those that blend (glows, glass).
-      for (const mat of inst.materials) { mat.color.setRGB(p.color.x, p.color.y, p.color.z); if (mat.transparent) mat.opacity = saturate(p.alpha); }
+      const [cr, cg, cb] = scaled(this.colorScale, p, s);
+      for (const mat of inst.materials) { mat.color.setRGB(cr, cg, cb); if (mat.transparent) mat.opacity = saturate(p.alpha); }
       alive.add(p);
       const q = p.orient || qangle(p.rot.y, p.rot.x, p.rot.z), r = Math.max(1e-4, p.radius);
       inst.scene.matrix.compose(p.pos, q, new THREE.Vector3(r, r, r)).multiply(GLTF_TO_SOURCE); inst.scene.matrixWorldNeedsUpdate = true; inst.scene.visible = p.alpha > 0.01;
@@ -1647,10 +1664,10 @@ export class Library {
   // Colour textures are read as sRGB, except for mod2x: its «modulate» textures are 50 % grey where
   // they leave the picture alone, which as sRGB would be 21 % linear and darken the whole square.
   texture(r) {
-    // Without a texture, or with one the game lacks (the seasonal unusual effects' light glow: their
-    // halo round the item), an additive card is a soft glow; others would cover what they lie on.
+    // Without a texture, or with one the game lacks (the seasonal unusual effects' light glow and
+    // smoke: their halo round the item), a card is a soft glow; mod2x would darken a square.
     let path = r.m_vecTexturesInput?.[0]?.m_hTexture || r.m_hTexture || GLOW;
-    if (!this.textures[path] && r.m_nOutputBlendMode === 'PARTICLE_OUTPUT_BLEND_MODE_ADD') path = this.textures[SOFT_GLOW] && path !== GLOW ? SOFT_GLOW : GLOW;
+    if (!this.textures[path] && r.m_nOutputBlendMode !== 'PARTICLE_OUTPUT_BLEND_MODE_MOD2X') path = path !== GLOW && this.textures[standIn(path)] ? standIn(path) : /smoke/.test(path) ? path : GLOW;
     const raw = r.m_nOutputBlendMode === 'PARTICLE_OUTPUT_BLEND_MODE_MOD2X', key = raw ? `${path}#raw` : path;
     if (!this.cache.has(key)) {
       // options.onTexture: a texture once loaded (the viewer shrinks them on phones).

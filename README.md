@@ -44,6 +44,7 @@ new HeroViewer(canvas, {
   framing: 'hero',     // 'hero' (fit the hero) or 'full' (hero and pedestal whole)
   pixelRatio: 2,
   textureScale: 1,     // 0.5 by default on phones and machines of 4 GB or less: a quarter of the GPU memory
+  softParticles: true, // effects fade where they meet the hero (depth feathering): one more depth pass a frame
   onProgress: (loaded, total) => {},
   onAnimation: (name) => {},
 });

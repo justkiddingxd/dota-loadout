@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { Library, Simulation, SOURCE_TO_GLTF } from './fx.js';
+import { Library, Simulation, SOFT, SOURCE_TO_GLTF } from './fx.js';
 import { heroMaterial } from './material.js';
 
 // Tone mapping: each channel stays as it is up to the knee and rolls off softly toward 1 above it,
@@ -41,6 +41,9 @@ export class HeroViewer {
     // The scene is drawn in linear light without a ceiling (the game's HDR), then tone mapped onto
     // the canvas: piled-up glows keep their hue instead of clipping to yellow and white.
     this.hdr = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: 4 });
+    // Soft particles (options.softParticles, on by default): the scene's depth without the effects,
+    // at half size, for the effects to fade against.
+    this.soft = this.options.softParticles !== false ? { target: new THREE.WebGLRenderTarget(1, 1, { depthTexture: new THREE.DepthTexture(1, 1) }), material: new THREE.MeshBasicMaterial({ colorWrite: false }) } : null;
     this.output = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({
       uniforms: { tScene: { value: this.hdr.texture }, uKnee: { value: KNEE } }, depthTest: false, depthWrite: false, blending: THREE.NoBlending, toneMapped: false,
       vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
@@ -129,6 +132,7 @@ void main() {
   fit() {
     const { clientWidth: w, clientHeight: h } = this.canvas; if (!w || !h) return;
     this.renderer.setSize(w, h, false); this.camera.aspect = w / h; const size = this.renderer.getDrawingBufferSize(new THREE.Vector2()); this.hdr.setSize(size.x, size.y);
+    if (this.soft) { this.soft.target.setSize(Math.ceil(size.x / 2), Math.ceil(size.y / 2)); SOFT.uSceneSize.value.copy(size); }
     this.camera.fov = 30; this.camera.updateProjectionMatrix(); this.place();
   }
   place() {
@@ -177,13 +181,20 @@ void main() {
     t.angle += (t.target - t.angle) * (1 - Math.exp(-EASE * dt)); this.hero.turntable.rotation.y = t.angle;
     if (Math.abs(this.view.zoomTarget - this.view.zoom) > 1e-4) { this.view.zoom += (this.view.zoomTarget - this.view.zoom) * (1 - Math.exp(-EASE * dt)); this.place(); }
     this.hero.update(dt, this.camera);
-    const r = this.renderer; r.setRenderTarget(this.hdr); r.clear(); r.render(this.scene, this.camera); r.setRenderTarget(null); r.render(this.output, this.outputCamera);
+    const r = this.renderer;
+    if (this.soft) {
+      const fx = this.hero.lib.group, shadows = r.shadowMap.autoUpdate; fx.visible = false; r.shadowMap.autoUpdate = false; this.scene.overrideMaterial = this.soft.material;
+      r.setRenderTarget(this.soft.target); r.clear(); r.render(this.scene, this.camera);
+      this.scene.overrideMaterial = null; r.shadowMap.autoUpdate = shadows; fx.visible = true;
+      SOFT.tSceneDepth.value = this.soft.target.depthTexture; SOFT.uNear.value = this.camera.near; SOFT.uFar.value = this.camera.far; SOFT.uSoft.value = true;
+    }
+    r.setRenderTarget(this.hdr); r.clear(); r.render(this.scene, this.camera); r.setRenderTarget(null); r.render(this.output, this.outputCamera);
   }
 
   dispose() {
     this.loading++; this.renderer.setAnimationLoop(null); this.resize.disconnect(); this.intersection.disconnect(); this.unload();
     const c = this.canvas; c.removeEventListener('pointerdown', this.onDown); c.removeEventListener('pointermove', this.onMove); c.removeEventListener('pointerup', this.onUp); c.removeEventListener('pointercancel', this.onUp); c.removeEventListener('wheel', this.onWheel);
-    this.hdr.dispose(); this.output.geometry.dispose(); this.output.material.dispose(); this.renderer.dispose();
+    this.hdr.dispose(); if (this.soft) { this.soft.target.dispose(); this.soft.material.dispose(); SOFT.uSoft.value = false; } this.output.geometry.dispose(); this.output.material.dispose(); this.renderer.dispose();
   }
 }
 
@@ -333,12 +344,14 @@ async function buildHero(manifest, url, manager, time, light, textureScale = 1) 
     // The clip: the one named most like the effect (Arc Warden's …_hat_start effect plays the hat's
     // …_hat_start, its …_hat_start_loadout the …_loadout one, whatever activities they name), else
     // the one of the renderer's activity.
-    get(path, activity, system) {
+    get(path, activity, system, override = null) {
       const info = manifest.fxModels?.[path], source = info && propModels[info.file]; if (!source) return null;
       // Materials of its own (an item's model has its item's): the particle tints them, each its own.
       const scene = cloneSkinned(source.scene), mats = info.materials || manifest.materials, own = [];
       scene.traverse((o) => { if (!o.isMesh) return; o.frustumCulled = false; o.castShadow = false; o.userData.material ??= o.material.name;
-        const m = mats[o.userData.material]; o.visible = !!m; if (!m) return; o.material = heroMaterial(m, info.texture || texture, time, light, info.cube || cube); own.push(o.material); });
+        // The renderer's material in place of the model's own; without it, the model is not drawn (a
+        // stand-in card, Ravencloak's main-menu sky, must not show as itself).
+        const m = override ? mats[override] || manifest.materials?.[override] : mats[o.userData.material]; o.visible = !!m; if (!m) return; o.material = heroMaterial(m, info.texture || texture, time, light, info.cube || cube); own.push(o.material); });
       const words = (system || '').split('/').pop().split('_'), tail = (name) => { const w = name.split('_'); let k = 0; while (k < w.length && k < words.length && w[w.length - 1 - k] === words[words.length - 1 - k]) k++; return k; };
       const named = source.animations.map((c) => [c, tail(c.name)]).sort((a, b) => b[1] - a[1])[0];
       const clip = named && named[1] >= 2 ? named[0] : source.animations.find((c) => c.name === info.clips?.[activity]) || source.animations[0] || null;

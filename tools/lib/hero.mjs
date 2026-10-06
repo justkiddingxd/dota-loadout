@@ -21,7 +21,7 @@ import { parseKV3 } from '../kv3.mjs';
 
 // The viewer's cards for sprites without a texture of their own, and with one the game lacks
 // (src/fx.js Library.texture).
-const GLOW = 'materials/particle/particle_glow_05.vtex', SOFT_GLOW = 'materials/particle/particle_glow_01.vtex';
+const GLOW = 'materials/particle/particle_glow_05.vtex', SOFT_GLOW = 'materials/particle/particle_glow_01.vtex', SMOKE = 'materials/particle/smoke1/smoke1.vtex';
 const exec = promisify(execFile);
 
 // game: the game's folder (…/dota, with gameinfo.gi); cli: Source2Viewer-CLI; hero: an entry of
@@ -202,6 +202,9 @@ export async function buildBundle({ game, cli, out, temp, log = () => {}, MODELS
   const sizeCap = (name) => (/pedestal/.test(name) ? 512 : 2048);
   const vector = (text) => (text || '').replace(/[[\]]/g, '').trim().split(/\s+/).filter(Boolean).map(Number);
   const shared = new Map();
+  // A particle model drawn in a material of the renderer's (m_hOverrideMaterial: Drow's Ravencloak
+  // draws its eye glow on a card of the main menu's sky) needs that material, not its own.
+  for (const s of Object.values(systems)) for (const r of s.m_Renderers || []) if (r._class === 'C_OP_RenderModels' && r.m_hOverrideMaterial) materials[basename(r.m_hOverrideMaterial, '.vmat')] ||= { vmat: r.m_hOverrideMaterial };
   for (const [name, entry] of Object.entries(materials)) {
     if (!entry.vmat || !has(entry.vmat)) { delete materials[name]; continue; }
     const dir = join(temp, 'vmat', name);
@@ -306,7 +309,7 @@ export async function buildBundle({ game, cli, out, temp, log = () => {}, MODELS
   const sprites = Object.values(systems).flatMap((s) => (s.m_Renderers || []).filter((r) => /Sprites|Ropes|Trails/.test(r._class)));
   const named = sprites.map((r) => r.m_vecTexturesInput?.[0]?.m_hTexture || r.m_hTexture);
   if (named.some((t) => !t)) textureSet.add(GLOW);
-  if (named.some((t) => t && !has(t))) textureSet.add(SOFT_GLOW);
+  for (const t of named) if (t && !has(t)) textureSet.add(/smoke/.test(t) ? SMOKE : SOFT_GLOW);
   for (const vtex of [...textureSet].sort()) {
     if (!has(vtex)) continue;
     const base = basename(vtex, '.vtex'), dir = join(temp, 'vtex', base), name = vtex.replace(/^materials\/particle\//, '').replace(/\.vtex$/, '').replace(/\//g, '__');
