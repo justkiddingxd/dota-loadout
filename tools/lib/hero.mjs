@@ -19,6 +19,8 @@ import { compact, readGlb, readPng, writeGlb } from './files.mjs';
 import { particleEvents, pickAnimations, scopeProps, sequences } from './game.mjs';
 import { parseKV3 } from '../kv3.mjs';
 
+// The viewer's card for sprites without a texture of their own (src/fx.js Library.texture).
+const GLOW = 'materials/particle/particle_glow_05.vtex';
 const exec = promisify(execFile);
 
 // game: the game's folder (…/dota, with gameinfo.gi); cli: Source2Viewer-CLI; hero: an entry of
@@ -295,6 +297,10 @@ export async function buildBundle({ game, cli, out, temp, log = () => {}, MODELS
   // Particle textures; sprite sheets come out of the CLI as frames cropped to their content, put back
   // at their own rectangles so the sheet's UVs are Valve's.
   const textures = {};
+  // A sprite card without a texture, or with one the game does not have (the seasonal unusual
+  // effects' light_glow_01), draws the soft glow the viewer takes for it: it comes along.
+  const sprites = Object.values(systems).flatMap((s) => (s.m_Renderers || []).filter((r) => /Sprites|Ropes|Trails/.test(r._class)));
+  if (sprites.some((r) => { const t = r.m_vecTexturesInput?.[0]?.m_hTexture || r.m_hTexture; return !t || !has(t); })) textureSet.add(GLOW);
   for (const vtex of [...textureSet].sort()) {
     if (!has(vtex)) continue;
     const base = basename(vtex, '.vtex'), dir = join(temp, 'vtex', base), name = vtex.replace(/^materials\/particle\//, '').replace(/\.vtex$/, '').replace(/\//g, '__');

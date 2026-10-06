@@ -202,7 +202,11 @@ const shrink = (scale) => (scale >= 1 ? undefined : (t) => {
   c.getContext('2d').drawImage(img, 0, 0, c.width, c.height); t.image = c; t.needsUpdate = true;
 });
 async function buildHero(manifest, url, manager, time, light, textureScale = 1) {
-  const made = [], textureOf = (loader, address) => (file, srgb = false) => { const t = loader.load(address(`textures/${file}`), shrink(textureScale)); t.flipY = false; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace; t.anisotropy = 4; made.push(t); return t; };
+  // Each texture once (particle models make materials of their own, many a second).
+  const made = [], textureCache = new Map(), textureOf = (loader, address) => (file, srgb = false) => {
+    const href = address(`textures/${file}`), key = `${href}#${srgb}`; if (textureCache.has(key)) return textureCache.get(key);
+    const t = loader.load(href, shrink(textureScale)); t.flipY = false; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace; t.anisotropy = 4; made.push(t); textureCache.set(key, t); return t;
+  };
   const texture = textureOf(new THREE.TextureLoader(manager), url);
   // Cube maps from their strip of faces (+X −X +Y −Y +Z −Z in the game's axes), one of each.
   const cubes = new Map();

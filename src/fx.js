@@ -1490,6 +1490,7 @@ function sheetFrame(info, p, rate, type) {
   for (let i = 0; i < seq.frames.length; i++) { const f = seq.frames[i]; if (pos < f.time || i === seq.frames.length - 1) { const n = seq.clamp ? Math.min(i + 1, seq.frames.length - 1) : (i + 1) % seq.frames.length; return { a: f.uv, b: seq.frames[n].uv, fa: f, fb: seq.frames[n], t: f.time > 0 ? saturate(pos / f.time) : 0 }; } pos -= f.time; }
   return null;
 }
+const GLOW = 'materials/particle/particle_glow_05.vtex';
 const FULL = [0, 0, 1, 1], Z = new THREE.Vector3(0, 0, 1);
 // Screen-facing basis in the particle space, from the camera.
 function billboard(camera, groupInverse) {
@@ -1591,16 +1592,18 @@ const GLTF_TO_SOURCE = SOURCE_TO_GLTF.clone().invert();
 class ModelRenderer {
   constructor(r, lib, sim) {
     this.lib = lib; this.list = (r.m_ModelList || []).map((m) => m.m_model).filter(Boolean); this.activity = r.m_ActivityName || null; this.animated = r.m_bAnimated;
-    this.rate = (r.m_flAnimationRate ?? 30) / 30; this.instances = new Map();
+    this.rate = (r.m_flAnimationRate ?? 30) / 30; this.instances = new Map(); this.free = [];
   }
   update(ps, s) {
     const alive = new Set();
     for (const p of ps) {
       let inst = this.instances.get(p);
+      // A model of one gone is taken again before a new one is made (feathers come and go by the hundred).
+      if (!inst) { const path = this.list[p.uid % Math.max(1, this.list.length)], i = this.free.findIndex((f) => f.path === path); if (i >= 0) { inst = this.free.splice(i, 1)[0]; inst.scene.visible = true; inst.mixer?.setTime(0); this.instances.set(p, inst); } }
       if (!inst) {
-        const m = this.lib.models.get(this.list[p.uid % Math.max(1, this.list.length)], this.activity, s.sim.def._path); if (!m) continue;
+        const path = this.list[p.uid % Math.max(1, this.list.length)], m = this.lib.models.get(path, this.activity, s.sim.def._path); if (!m) continue;
         const mixer = this.animated && m.clip ? new THREE.AnimationMixer(m.scene) : null; if (mixer) mixer.clipAction(m.clip).play();
-        m.scene.matrixAutoUpdate = false; this.lib.group.add(m.scene); inst = { scene: m.scene, mixer, materials: m.materials || [] }; this.instances.set(p, inst);
+        m.scene.matrixAutoUpdate = false; this.lib.group.add(m.scene); inst = { path, scene: m.scene, mixer, materials: m.materials || [] }; this.instances.set(p, inst);
       }
       // The particle's colour tints the model; its alpha fades those that blend (glows, glass).
       for (const mat of inst.materials) { mat.color.setRGB(p.color.x, p.color.y, p.color.z); if (mat.transparent) mat.opacity = saturate(p.alpha); }
@@ -1609,10 +1612,10 @@ class ModelRenderer {
       inst.scene.matrix.compose(p.pos, q, new THREE.Vector3(r, r, r)).multiply(GLTF_TO_SOURCE); inst.scene.matrixWorldNeedsUpdate = true; inst.scene.visible = p.alpha > 0.01;
       if (inst.mixer) inst.mixer.setTime(p.age * this.rate);
     }
-    for (const [p, inst] of this.instances) if (!alive.has(p)) this.drop(p, inst);
+    for (const [p, inst] of this.instances) if (!alive.has(p)) { this.instances.delete(p); inst.scene.visible = false; if (this.free.length < 256) this.free.push(inst); else this.drop(inst); }
   }
-  drop(p, inst) { this.lib.group.remove(inst.scene); for (const m of inst.materials) m.dispose(); this.instances.delete(p); }
-  dispose() { for (const [p, inst] of this.instances) this.drop(p, inst); }
+  drop(inst) { this.lib.group.remove(inst.scene); for (const m of inst.materials) m.dispose(); }
+  dispose() { for (const inst of [...this.instances.values(), ...this.free]) this.drop(inst); this.instances.clear(); this.free = []; }
 }
 
 export class Library {
@@ -1636,7 +1639,10 @@ export class Library {
   // Colour textures are read as sRGB, except for mod2x: its «modulate» textures are 50 % grey where
   // they leave the picture alone, which as sRGB would be 21 % linear and darken the whole square.
   texture(r) {
-    const path = r.m_vecTexturesInput?.[0]?.m_hTexture || r.m_hTexture || 'materials/particle/particle_glow_05.vtex';
+    // Without a texture, or with one the game lacks (the seasonal unusual effects' light glow), an
+    // additive card is a soft glow.
+    let path = r.m_vecTexturesInput?.[0]?.m_hTexture || r.m_hTexture || GLOW;
+    if (!this.textures[path] && r.m_nOutputBlendMode === 'PARTICLE_OUTPUT_BLEND_MODE_ADD') path = GLOW;
     const raw = r.m_nOutputBlendMode === 'PARTICLE_OUTPUT_BLEND_MODE_MOD2X', key = raw ? `${path}#raw` : path;
     if (!this.cache.has(key)) {
       // options.onTexture: a texture once loaded (the viewer shrinks them on phones).
