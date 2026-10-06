@@ -36,7 +36,7 @@ await depot(['-manifest-only', '-os', 'windows', '-osarch', '64', '-dir', MANIFE
 const depotOf = new Map();
 for (const f of readdirSync(MANIFESTS).filter((f) => /^manifest_\d+_\d+\.txt$/.test(f))) {
   const id = f.split('_')[1];
-  for (const line of readFileSync(join(MANIFESTS, f), 'utf8').split('\n')) { const m = /\s(game\/dota\/\S+)$/.exec(line); if (m) depotOf.set(m[1], id); }
+  for (const line of readFileSync(join(MANIFESTS, f), 'utf8').split('\n')) { const m = /\s(game\/(?:dota|core)\/\S+)$/.exec(line); if (m) depotOf.set(m[1], id); }
 }
 const download = async (files) => {
   const byDepot = new Map(); for (const f of files) { const d = depotOf.get(f); if (!d) throw new Error(`No depot has ${f}`); (byDepot.get(d) || byDepot.set(d, []).get(d)).push(f); }
@@ -115,7 +115,28 @@ for (const item of Object.values(items)) {
   if (!defaultsOnly && item.image_inventory) roots.add(`panorama/images/${item.image_inventory.toLowerCase()}_png.vtex_c`);
 }
 assets(parseKV(text('scripts/npc/portraits_full_body_loadout.txt')).data.DOTAFullBodyLoadoutPortraitInfo, roots);
+// The site's pictures of the heroes: their portraits (wide, tall for the picker, small icons) and
+// the attributes' icons.
+for (const p of vpk.files.keys()) if (/^panorama\/images\/(heroes\/(selection\/|icons\/)?npc_dota_hero_[a-z_0-9]+_png|primary_attribute_icons\/[a-z_]+_psd)\.vtex_c$/.test(p)) roots.add(p);
 log(`${count} items, ${roots.size} roots`);
 await take(roots);
+// What the game's archives lack and the engine's (game/core) have — the game mounts both: shared
+// particle textures (light_glow_01 of 362 items' glows). Taken with what they reference there.
+await download(['game/core/pak01_dir.vpk']);
+const core = new Vpk(join(DL, 'game/core/pak01_dir.vpk')), corePath = (a) => join(DL, 'game/core', `pak01_${String(a).padStart(3, '0')}.vpk`);
+const fromCore = new Set([...missing].map((p) => (core.has(p) ? p : `${p}_c`)).filter((p) => core.has(p)));
+const coreArchives = [...new Set([...fromCore].map((p) => core.archiveOf(p)).filter((a) => a !== null))];
+if (fromCore.size) {
+  log(`${fromCore.size} files from the engine's archives (${coreArchives.length} of them)…`);
+  await download(coreArchives.map((a) => `game/core/pak01_${String(a).padStart(3, '0')}.vpk`));
+  const queue = [...fromCore], seen = new Set();
+  while (queue.length) {
+    const path = queue.pop(); if (seen.has(path) || !core.has(path) || SKIP.test(path)) continue; seen.add(path);
+    const a = core.archiveOf(path); if (a !== null && !existsSync(corePath(a))) continue;
+    const data = core.read(path); if (!existsSync(join(OUT, path))) write(path, data); missing.delete(path.replace(/_c$/, '')); missing.delete(path);
+    if (path.endsWith('_c')) for (const r of references(data)) { const c = `${r.toLowerCase()}_c`; if (!vpk.has(c) && !existsSync(join(OUT, c))) queue.push(c); }
+  }
+  core.close(); for (const a of coreArchives) rmSync(corePath(a), { force: true });
+}
 writeFileSync(join(OUT, '.from'), `steam ${readFileSync(join(OUT, 'steam.inf'), 'utf8').match(/ClientVersion=(\d+)/)?.[1] || ''}`);
 log(`Done: ${done.size} files, ${(bytes / 2 ** 30).toFixed(2)} GB in ${OUT}; ${missing.size} references not in the game`);
