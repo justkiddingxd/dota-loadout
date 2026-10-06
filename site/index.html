@@ -6,84 +6,72 @@
   <title>Loadout — Dota 2 heroes in the browser</title>
   <meta name="description" content="Every Dota 2 hero rendered live in the browser, in any of the game's items: the game's hero shader, animations and particle effects. Open source, MIT.">
   <meta name="theme-color" content="#0e1215">
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230b0a08'/%3E%3Cpath d='M11 7v18h11' fill='none' stroke='%23ece4d2' stroke-width='3.4'/%3E%3C/svg%3E">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230e1215'/%3E%3Cpath d='M11 7v18h11' fill='none' stroke='%23e3b46a' stroke-width='3.4'/%3E%3C/svg%3E">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800&family=Barlow+Semi+Condensed:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="./style.css">
 </head>
 <body data-attr="agi">
-  <div class="app">
-    <header class="bar">
-      <a class="logo" href="./" aria-label="Loadout"><span class="logo-mark">Loadout</span><span class="logo-text">Dota 2</span></a>
-      <button class="switch" type="button" data-open-picker aria-haspopup="dialog">
-        <img data-switch-icon alt="">
-        <span class="switch-name" data-switch-name></span>
-        <span class="switch-hint" data-t="allHeroes"></span>
-        <kbd>/</kbd>
-      </button>
-      <nav class="bar-tools">
+  <div class="app" data-app>
+    <!-- The hero, over the whole screen; it rises when the wardrobe's sheet comes up. -->
+    <main class="stage" data-stage>
+      <div class="backdrop" aria-hidden="true"><div class="glow"></div><div class="floor"></div></div>
+      <canvas class="view" data-view></canvas>
+      <div class="status" data-status>
+        <div class="bar-line"><i data-bar></i></div>
+        <span data-status-text></span>
+      </div>
+      <p class="hint" data-hint></p>
+    </main>
+
+    <header class="top">
+      <div class="hero-switch">
+        <button class="step" type="button" data-prev aria-label="Previous hero">‹</button>
+        <button class="switch" type="button" data-open-picker aria-haspopup="dialog">
+          <img data-switch-icon alt="">
+          <span class="switch-text">
+            <small><img class="attr-icon" data-attr-icon alt=""><span data-attr-name></span></small>
+            <b data-switch-name></b>
+          </span>
+          <kbd>/</kbd>
+        </button>
+        <button class="step" type="button" data-next aria-label="Next hero">›</button>
+      </div>
+      <nav class="top-tools">
+        <button type="button" data-share></button>
         <button type="button" data-embed></button>
         <a href="https://github.com/justkiddingxd/dota-loadout" data-repo>GitHub</a>
         <button class="lang" type="button" data-lang-toggle>EN</button>
       </nav>
     </header>
 
-    <main class="stage">
-      <div class="backdrop" aria-hidden="true">
-        <div class="glow"></div>
-        <div class="floor"></div>
-        <div class="ghost" data-ghost></div>
-      </div>
-      <canvas class="view" data-view></canvas>
+    <nav class="anims" aria-label="Animations">
+      <span class="label" data-t="animations"></span>
+      <ul data-anims></ul>
+    </nav>
+    <button class="recenter" type="button" data-reset></button>
+    <p class="toast" data-toast></p>
 
-      <div class="status" data-status>
-        <div class="bar-line"><i data-bar></i></div>
-        <span data-status-text></span>
-      </div>
-      <p class="hint" data-hint></p>
-      <button class="recenter" type="button" data-reset></button>
-
-      <section class="ident">
-        <div class="kicker">
-          <img class="attr-icon" data-attr-icon alt="">
-          <span data-attr-name></span>
-          <span class="sep">·</span>
-          <span data-roles></span>
-        </div>
-        <h1><span class="num" data-num></span><span data-name></span></h1>
-        <div class="complexity" data-complexity></div>
-        <p class="hype" data-hype></p>
-      </section>
-
-      <nav class="anims" aria-label="Animations">
-        <span class="label" data-t="animations"></span>
-        <ul data-anims></ul>
-      </nav>
-    </main>
-
-    <aside class="wardrobe" aria-label="Wardrobe" data-wardrobe>
-      <header class="wd-head">
-        <div class="tabs" role="tablist">
-          <button type="button" role="tab" data-tab="items" data-t="items"></button>
-          <button type="button" role="tab" data-tab="sets" data-t="sets"></button>
-        </div>
-        <button class="reset-all" type="button" data-reset-all data-t="allDefault"></button>
+    <!-- The wardrobe: a dock of the slots, and a sheet of one slot's items above it. -->
+    <section class="sheet" data-sheet hidden>
+      <header class="sheet-head">
+        <h2 data-sheet-title></h2>
+        <span class="sheet-count" data-sheet-count></span>
+        <label class="item-search"><input type="search" autocomplete="off" spellcheck="false" data-item-search></label>
+        <div class="rarities" data-rarities></div>
+        <button class="close" type="button" data-close-sheet aria-label="Close">×</button>
       </header>
-      <div class="wd-body" data-wd-body></div>
-      <footer class="colophon">
-        <p data-t="colophon"></p>
-        <p class="meta">MIT · <span data-build></span></p>
-      </footer>
-    </aside>
+      <div class="sheet-opts" data-sheet-opts></div>
+      <div class="sheet-body" data-sheet-body></div>
+    </section>
+    <nav class="dock" data-dock aria-label="Wardrobe"></nav>
   </div>
 
   <div class="picker" data-picker hidden role="dialog" aria-modal="true" aria-label="Heroes">
     <div class="picker-inner">
       <header class="picker-head">
-        <label class="search">
-          <input type="search" autocomplete="off" spellcheck="false" data-search>
-        </label>
+        <label class="search"><input type="search" autocomplete="off" spellcheck="false" data-search></label>
         <div class="attrs" role="group" data-attrs></div>
         <button class="close" type="button" data-close-picker aria-label="Close">×</button>
       </header>
