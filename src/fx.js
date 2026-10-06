@@ -45,7 +45,7 @@ class Particle {
     this.age = 0; this.life = c.life; this.alpha = c.alpha; this.alpha2 = 1; this.color = c.color.clone(); this.radius = c.radius; this.trail = 0.1;
     this.rot = new THREE.Vector3(0, 0, c.roll); this.rotSpeed = new THREE.Vector3(0, 0, c.rollSpeed); this.normal = new THREE.Vector3(0, 0, 1);
     this.seq = c.seq; this.seq2 = 0; this.created = 0; this.forceScale = 1; this.s = [0, 0, 0]; this.sv = new THREE.Vector3(); this.sv2 = new THREE.Vector3();
-    this.id = 0; this.uid = 0; this.index = 0; this.dead = false; this.initial = null; this.bone = null; this.snap = -1;
+    this.id = 0; this.uid = 0; this.index = 0; this.dead = false; this.initial = null; this.bone = null; this.snap = -1; this.orient = null;
   }
   get nage() { return this.age / Math.max(1e-4, this.life); }
   getS(f) {
@@ -160,6 +160,8 @@ function writes(d) {
     case 'C_INIT_InitialVelocityNoise': return [F.PositionPrevious];
     case 'C_INIT_NormalAlignToCP': return [F.Normal];
     case 'C_INIT_RemapParticleCountToScalar': case 'C_INIT_DistanceToCPInit': return [field(d.m_nFieldOutput, F.Radius)];
+    case 'C_INIT_CreationNoise': case 'C_INIT_InheritFromParentParticles': case 'C_INIT_RemapInitialCPDirectionToRotation': return [field(d.m_nFieldOutput, d._class === 'C_INIT_CreationNoise' ? F.Radius : F.Roll)];
+    case 'C_INIT_RemapCPOrientationToRotations': return [F.Roll, F.Yaw, F.Pitch];
     case 'C_INIT_InitFromCPSnapshot': { const a = field(d.m_nAttributeToWrite ?? d.m_nAttributeToRead, F.Position); return a === F.Position ? POS : [a]; }
     default: return POS;
   }
@@ -193,11 +195,15 @@ const INIT = {
   C_INIT_RingWave(d) {
     const r0 = number(d.m_flInitialRadius), th = number(d.m_flThickness), ppo = number(d.m_flParticlesPerOrbit, -1), s0 = number(d.m_flInitialSpeedMin), s1 = number(d.m_flInitialSpeedMax);
     const even = d.m_bEvenDistribution, tr = transform(d.m_TransformInput, d.m_nControlPointNumber ?? 0), roll = (d.m_flRoll ?? 0) * Math.PI / 180, yaw = (d.m_flYaw ?? 0) * Math.PI / 180; let orbit = 0;
+    // The ring lies flat in the world (around the control point, not turned with it) unless it is
+    // given a transform; its push outward is horizontal unless m_bXYVelocityOnly is off.
+    const oriented = !!d.m_TransformInput, flat = d.m_bXYVelocityOnly !== false;
     return (p, s) => {
       const per = Math.max(1, ppo(p, s) === -1 ? s.max : ppo(p, s)); const a = even ? ((orbit = (orbit + 1) % per) / per) * Math.PI * 2 : rnd() * Math.PI * 2;
       const local = new THREE.Vector3(Math.cos(a), Math.sin(a), 0).multiplyScalar(r0(p, s)).add(inUnitBall().v.multiplyScalar(th(p, s)));
-      local.applyEuler(new THREE.Euler(roll, 0, yaw)); const m = tr(s); p.pos.copy(local.applyMatrix4(m));
-      const out = p.pos.clone().sub(new THREE.Vector3().setFromMatrixPosition(m)).normalize(); p.vel.add(out.multiplyScalar(lerp(s0(p, s), s1(p, s), rnd())));
+      local.applyEuler(new THREE.Euler(roll, 0, yaw)); const m = tr(s), c = new THREE.Vector3().setFromMatrixPosition(m);
+      p.pos.copy(oriented ? local.applyMatrix4(m) : local.add(c));
+      const out = p.pos.clone().sub(c); if (flat) out.z = 0; out.normalize(); p.vel.add(out.multiplyScalar(lerp(s0(p, s), s1(p, s), rnd())));
     };
   },
   C_INIT_PositionWarp(d) {
@@ -249,6 +255,56 @@ function sphere(d, tr) {
     p.vel.copy((local ? dir.clone().applyMatrix3(m3) : dir).multiplyScalar(speed)).add(ls);
   };
 }
+// The ground under the hero is the plane of his origin (z 0 of the effects' space).
+const GROUND = 0;
+// A control point's orientation, offset by angles in degrees (x pitch, y yaw, z roll: Source's QAngle).
+const angles = (a) => new THREE.Quaternion().setFromEuler(new THREE.Euler(a.z * Math.PI / 180, a.x * Math.PI / 180, a.y * Math.PI / 180, 'ZYX'));
+const qangle = (pitch, yaw, roll) => new THREE.Quaternion().setFromEuler(new THREE.Euler(roll, pitch, yaw, 'ZYX'));
+// A point along a path between two control points, bulged sideways (CPathParameters).
+function pathPoint(params, t, s) {
+  const a = s.cp(params?.m_nStartControlPointNumber ?? 0).pos, b = s.cp(params?.m_nEndControlPointNumber ?? 0).pos, mid = params?.m_flMidPoint ?? 0.5, bulge = params?.m_flBulge ?? 0;
+  const p = a.clone().lerp(b, t); if (bulge) { const dir = b.clone().sub(a), side = dir.clone().cross(new THREE.Vector3(0, 0, 1)); if (side.lengthSq() < 1e-6) side.set(0, 1, 0); p.addScaledVector(side.normalize(), bulge * Math.sin(Math.PI * Math.min(1, t / Math.max(1e-3, mid * 2)))); }
+  return p;
+}
+Object.assign(INIT, {
+  C_INIT_CreateSequentialPath(d) {
+    const n = Math.max(1, d.m_flNumToAssign ?? 100), loop = d.m_bLoop !== false, params = d.m_PathParams; let i = 0;
+    return (p, s) => { const k = i++ % n, t = n > 1 ? k / (loop ? n : n - 1) : 0; p.pos.copy(pathPoint(params, t, s)); p.prev.copy(p.pos); p.pathT = t; };
+  },
+  C_INIT_RandomSecondSequence(d) { const a = d.m_nSequenceMin ?? 0, b = d.m_nSequenceMax ?? 0; return (p) => { p.seq2 = a + Math.floor(rnd() * (b - a + 1)); }; },
+  C_INIT_RemapCPtoVector(d) { const op = OP.C_OP_RemapCPtoVector(d); return (p, s) => op([p], 0, s, 1); },
+  C_INIT_CreateWithinBox(d) {
+    const a = vector(d.m_vecMin), b = vector(d.m_vecMax), cp = d.m_nControlPointNumber ?? 0, local = d.m_bLocalSpace;
+    return (p, s) => { const lo = a(p, s), hi = b(p, s), o = new THREE.Vector3(lerp(lo.x, hi.x, rnd()), lerp(lo.y, hi.y, rnd()), lerp(lo.z, hi.z, rnd())); if (local) o.applyQuaternion(s.cp(cp).quat); p.pos.copy(s.cp(cp).pos).add(o); p.prev.copy(p.pos); };
+  },
+  C_INIT_InheritVelocity: () => () => {},
+  C_INIT_PositionPlaceOnGround(d) { const off = number(d.m_flOffset); return (p, s) => { p.pos.z = GROUND + off(p, s); p.prev.z = p.pos.z; }; },
+  C_INIT_CreationNoise(d) {
+    const out = field(d.m_nFieldOutput, F.Radius), lo = d.m_flOutputMin ?? 0, hi = d.m_flOutputMax ?? 1, ns = d.m_flNoiseScale ?? 0.1, nl = d.m_flNoiseScaleLoc ?? 0.001, abs = d.m_bAbsVal, inv = d.m_bAbsValInv, off = d.m_flOffset ?? 0;
+    return (p) => { let n = noise3(p.pos.x * nl + (p.created + off) * ns, p.pos.y * nl, p.pos.z * nl); if (abs || inv) { n = Math.abs(n); if (inv) n = 1 - n; } else n = (n + 1) / 2;
+      let v = lerp(lo, hi, saturate(n)); if (ANGLE.has(out)) v *= Math.PI / 180; p.setS(out, v); };
+  },
+  C_INIT_VelocityRandom(d) {
+    const v0 = number(d.m_fSpeedMin), v1 = number(d.m_fSpeedMax), l0 = vector(d.m_LocalCoordinateSystemSpeedMin), l1 = vector(d.m_LocalCoordinateSystemSpeedMax), tr = transform(d.m_TransformInput, d.m_nControlPointNumber ?? 0);
+    return (p, s) => { const m3 = new THREE.Matrix3().setFromMatrix4(tr(s)), lo = l0(p, s), hi = l1(p, s);
+      const v = inUnitBall().v.multiplyScalar(lerp(v0(p, s), v1(p, s), rnd())).add(new THREE.Vector3(lerp(lo.x, hi.x, rnd()), lerp(lo.y, hi.y, rnd()), lerp(lo.z, hi.z, rnd())).applyMatrix3(m3));
+      p.vel.add(v); p.prev.addScaledVector(v, -(s.prevDt || s.sim.maxStep)); };
+  },
+  C_INIT_RemapInitialCPDirectionToRotation(d) {
+    const cp = d.m_nCP ?? 0, out = field(d.m_nFieldOutput, F.Roll), off = (d.m_flOffsetRot ?? 0) * Math.PI / 180, comp = d.m_nComponent ?? 0;
+    return (p, s) => { const dir = new THREE.Vector3(...[[1, 0, 0], [0, 1, 0], [0, 0, 1]][comp]).applyQuaternion(s.cp(cp).quat); p.setS(out, Math.atan2(dir.y, dir.x) + off); };
+  },
+  C_INIT_NormalOffset(d) {
+    const a = vec(d.m_OffsetMin), b = vec(d.m_OffsetMax), local = d.m_bLocalCoords, cp = d.m_nControlPointNumber ?? 0, normalize = d.m_bNormalize;
+    return (p, s) => { const o = new THREE.Vector3(lerp(a.x, b.x, rnd()), lerp(a.y, b.y, rnd()), lerp(a.z, b.z, rnd())); if (local) o.applyQuaternion(s.cp(cp).quat); p.normal.add(o); if (normalize) p.normal.normalize(); };
+  },
+  C_INIT_RemapCPOrientationToRotations(d) { const op = OP.C_OP_RemapCPOrientationToRotations(d); return (p, s) => op([p], 0, s, 1); },
+  C_INIT_InheritFromParentParticles(d) {
+    const f = field(d.m_nFieldOutput, F.Color), scale = d.m_flScale ?? 1, random = d.m_bRandomDistribution, inc = d.m_nIncrement ?? 1;
+    return (p, s) => { const parent = s.parent?.sim?.particles; if (!parent?.length) return; const q = parent[random ? Math.floor(rnd() * parent.length) : (p.uid * inc) % parent.length];
+      if (f === F.Position || f === F.Color || f === F.Normal) p.setV(f, q.getV(f).clone().multiplyScalar(f === F.Position ? 1 : scale)); else p.setS(f, q.getS(f) * scale); };
+  },
+});
 INIT.C_INIT_PositionOffset = (d) => {
   const a = vector(d.m_OffsetMin), b = vector(d.m_OffsetMax), local = d.m_bLocalCoords, proportional = d.m_bProportional, tr = transform(d.m_TransformInput, d.m_nControlPointNumber ?? 0);
   return (p, s) => { const lo = a(p, s), hi = b(p, s); const o = new THREE.Vector3(lerp(lo.x, hi.x, rnd()), lerp(lo.y, hi.y, rnd()), lerp(lo.z, hi.z, rnd()));
@@ -417,6 +473,113 @@ const OP = {
     };
   },
   C_OP_SetControlPointFromObjectScale(d) { const out = d.m_nCPOutput ?? 1; return (ps, dt, s) => s.setCP(out, new THREE.Vector3(1, 1, 1)); },
+  C_OP_FadeAndKill(d) {
+    const si = d.m_flStartFadeInTime ?? 0, ei = d.m_flEndFadeInTime ?? 0.5, so = d.m_flStartFadeOutTime ?? 0.5, eo = d.m_flEndFadeOutTime ?? 1, a0 = d.m_flStartAlpha ?? 1, a1 = d.m_flEndAlpha ?? 0;
+    return (ps) => { for (const p of ps) { const t = p.nage, init = p.initS(F.Alpha); if (t >= 1) { p.dead = true; continue; }
+      if (t < ei && ei > si) p.alpha = init * lerp(a0, 1, saturate(remap(t, si, ei))); else if (t > so && eo > so) p.alpha = init * lerp(1, a1, saturate(remap(t, so, eo))); } };
+  },
+  C_OP_FadeIn(d) {
+    const t0 = d.m_flFadeInTimeMin ?? 0.25, t1 = d.m_flFadeInTimeMax ?? 0.25, prop = d.m_bProportional !== false;
+    return (ps) => { for (const p of ps) { const t = lerp(t0, t1, hash(p.uid, 93)), x = prop ? p.nage : p.age; if (x < t) p.alpha = (x / t) * p.initS(F.Alpha); } };
+  },
+  C_OP_Spin(d) {
+    const rate = (d.m_nSpinRateDegrees ?? 0) * Math.PI / 180, min = (d.m_nSpinRateMinDegrees ?? 0) * Math.PI / 180, stop = d.m_fSpinRateStopTime ?? 0;
+    return (ps, dt, s, str) => { for (const p of ps) { let r = rate; if (stop > 0) r = Math.max(min, rate * (1 - saturate(p.age / stop))); p.rot.z += r * dt * str; } };
+  },
+  C_OP_SpinYaw(d) { const rate = (d.m_nSpinRateDegrees ?? 0) * Math.PI / 180; return (ps, dt, s, str) => { for (const p of ps) p.rot.x += rate * dt * str; }; },
+  C_OP_OscillateScalar(d) {
+    const r0 = d.m_RateMin ?? 0, r1 = d.m_RateMax ?? 0, f0 = d.m_FrequencyMin ?? 1, f1 = d.m_FrequencyMax ?? 1, f = field(d.m_nField, F.Alpha), prop = d.m_bProportional !== false, mult = d.m_flOscMult ?? 2, add = d.m_flOscAdd ?? 0.5;
+    const s0 = d.m_flStartTime_min ?? 0, s1 = d.m_flStartTime_max ?? 0, e0 = d.m_flEndTime_min ?? 1, e1 = d.m_flEndTime_max ?? 1;
+    return (ps, dt, s, str) => { for (const p of ps) { const a = lerp(s0, s1, hash(p.uid, 51)), b = lerp(e0, e1, hash(p.uid, 52)); if (p.nage < a || p.nage > b) continue;
+      const fq = lerp(f0, f1, hash(p.uid, 53)), ph = prop ? p.nage * fq * mult + add : fq * (mult * s.age + add);
+      let x = p.getS(f) + lerp(r0, r1, hash(p.uid, 54)) * str * dt * Math.sin(Math.PI * ph); if (f === F.Alpha) x = saturate(x); p.setS(f, x); } };
+  },
+  C_OP_SetFloat(d) {
+    const v = number(d.m_InputValue), out = field(d.m_nOutputField, F.Radius), method = d.m_nSetMethod, lerpK = number(d.m_Lerp, 1);
+    return (ps, dt, s) => { for (const p of ps) { let x = v(p, s); if (ANGLE.has(out) && !/SCALE/.test(method || '')) x *= Math.PI / 180; p.setS(out, lerp(p.getS(out), setMethod(p, out, x, method, true), lerpK(p, s))); } };
+  },
+  C_OP_Noise(d) {
+    const out = field(d.m_nFieldOutput, F.Radius), lo = d.m_flOutputMin ?? 0, hi = d.m_flOutputMax ?? 1, scale = d.m_fl4NoiseScale ?? 0.1, add = d.m_bAdditive, ts = d.m_flNoiseAnimationTimeScale ?? 0;
+    return (ps, dt, s, str) => { for (const p of ps) { const n = (noise3(p.pos.x * scale + ts * s.age, p.pos.y * scale, p.pos.z * scale) + 1) / 2; let v = lerp(lo, hi, saturate(n)); if (ANGLE.has(out)) v *= Math.PI / 180;
+      p.setS(out, add ? p.getS(out) + v * dt * str : lerp(p.getS(out), v, str)); } };
+  },
+  C_OP_InheritFromParentParticles(d) { const init = INIT.C_INIT_InheritFromParentParticles(d); return (ps, dt, s) => { for (const p of ps) init(p, s); }; },
+  // Model particles (a prop held for a taunt) sit on a control point and turn with it.
+  C_OP_SetToCP(d) {
+    const cp = d.m_nControlPointNumber ?? 0, off = vec(d.m_vecOffset), local = d.m_bOffsetLocal;
+    return (ps, dt, s) => { const c = s.cp(cp), o = local ? off.clone().applyQuaternion(c.quat) : off; for (const p of ps) { p.pos.copy(c.pos).add(o); p.prev.copy(p.pos); } };
+  },
+  C_OP_RemapCPOrientationToRotations(d) {
+    const cp = d.m_TransformInput?.m_nControlPoint ?? d.m_nCP ?? 0, offset = angles(vec(d.m_vecRotation));
+    return (ps, dt, s) => { const q = s.cp(cp).quat.clone().multiply(offset), e = new THREE.Euler().setFromQuaternion(q, 'ZYX');
+      for (const p of ps) { p.orient = q.clone(); p.rot.set(e.z, e.y, e.x); } };
+  },
+  C_OP_RemapCPtoScalar(d) {
+    const cp = d.m_nCPInput ?? 0, comp = d.m_nField ?? 0, i0 = d.m_flInputMin ?? 0, i1 = d.m_flInputMax ?? 1, o0 = d.m_flOutputMin ?? 0, o1 = d.m_flOutputMax ?? 1, out = field(d.m_nFieldOutput, F.Radius), method = d.m_nSetMethod;
+    const st = d.m_flStartTime ?? -1, et = d.m_flEndTime ?? -1;
+    return (ps, dt, s) => { const x = s.cp(cp).pos.getComponent(Math.min(2, comp)); let v = remapClamped(x, i0, i1, o0, o1); if (ANGLE.has(out)) v *= Math.PI / 180;
+      for (const p of ps) { if (st >= 0 && et > st && (p.nage < st || p.nage > et)) continue; p.setS(out, setMethod(p, out, v, method)); } };
+  },
+  C_OP_StopAfterCPDuration(d) {
+    const dur = number(d.m_flDuration, 1), destroy = d.m_bDestroyImmediately;
+    return (ps, dt, s) => { if (s.age < dur(null, s)) return; s.sim.root.stopEmission(); if (destroy) for (const p of ps) p.dead = true; };
+  },
+  C_OP_MovementPlaceOnGround(d) { const off = number(d.m_flOffset); return (ps, dt, s) => { for (const p of ps) { const z = GROUND + off(p, s); p.prev.z += z - p.pos.z; p.pos.z = z; } }; },
+  C_OP_LerpScalar(d) {
+    const out = field(d.m_nFieldOutput, F.Radius), target = number(d.m_flOutput), st = d.m_flStartTime ?? 0, et = d.m_flEndTime ?? 1;
+    return (ps, dt, s) => { for (const p of ps) { if (p.nage < st) continue; let v = target(p, s); if (ANGLE.has(out)) v *= Math.PI / 180; p.setS(out, lerp(p.initS(out), v, saturate(remap(p.nage, st, et)))); } };
+  },
+  C_OP_MaxVelocity(d) { const max = d.m_flMaxVelocity ?? 0; return (ps, dt) => { if (max <= 0 || dt <= 0) return; for (const p of ps) { const v = p.pos.clone().sub(p.prev), l = v.length() / dt; if (l > max) p.prev.copy(p.pos).sub(v.multiplyScalar(max / l)); } }; },
+  C_OP_ClampScalar(d) { const out = field(d.m_nFieldOutput, F.Radius), lo = number(d.m_flOutputMin), hi = number(d.m_flOutputMax, 1); return (ps, dt, s) => { for (const p of ps) p.setS(out, Math.min(Math.max(p.getS(out), lo(p, s)), hi(p, s))); }; },
+  // Children are on unless an operator turns them off; these are the defaults.
+  // Particles faded out below a minimum alpha die (systems without C_OP_Decay end their particles so).
+  C_OP_AlphaDecay(d) { const min = d.m_flMinAlpha ?? 0; return (ps) => { for (const p of ps) if (p.alpha <= min && p.age > 0) p.dead = true; }; },
+  C_OP_EnableChildrenFromParentParticleCount: () => () => {},
+  C_OP_DistanceCull(d) {
+    const cp = d.m_nControlPointNumber ?? 0, dist = d.m_flDistance ?? 0, inside = d.m_bCullInside, off = vec(d.m_vecPointOffset);
+    return (ps, dt, s) => { const c = s.cp(cp).pos.clone().add(off); for (const p of ps) { const far = p.pos.distanceTo(c) > dist; if (far !== !!inside) p.dead = true; } };
+  },
+  C_OP_MovementRotateParticleAroundAxis(d) {
+    const axis = vec(d.m_vecRotAxis, [0, 0, 1]).normalize(), rate = number(d.m_flRotRate, 180), cp = d.m_TransformInput?.m_nControlPoint ?? d.m_nCP ?? 0, local = d.m_bLocalSpace;
+    return (ps, dt, s, str) => { const c = s.cp(cp), ax = local ? axis.clone().applyQuaternion(c.quat) : axis, q = new THREE.Quaternion().setFromAxisAngle(ax, rate(null, s) * Math.PI / 180 * dt * str);
+      for (const p of ps) { p.pos.sub(c.pos).applyQuaternion(q).add(c.pos); p.prev.sub(c.pos).applyQuaternion(q).add(c.pos); } };
+  },
+  C_OP_RemapCPtoVector(d) {
+    const cp = d.m_nCPInput ?? 0, out = field(d.m_nFieldOutput, F.Color), i0 = vec(d.m_vInputMin), i1 = vec(d.m_vInputMax, [1, 1, 1]), o0 = vec(d.m_vOutputMin), o1 = vec(d.m_vOutputMax, [1, 1, 1]);
+    return (ps, dt, s) => { const x = s.cp(cp).pos, v = new THREE.Vector3(...[0, 1, 2].map((k) => remapClamped(x.getComponent(k), i0.getComponent(k), i1.getComponent(k), o0.getComponent(k), o1.getComponent(k)))); for (const p of ps) p.setV(out, v.clone()); };
+  },
+  C_OP_DampenToCP(d) {
+    const cp = d.m_nControlPointNumber ?? 0, range = d.m_flRange ?? 100, scale = d.m_flScale ?? 1;
+    return (ps, dt, s) => { const c = s.cp(cp).pos; for (const p of ps) { const dist = p.pos.distanceTo(c); if (dist > range) continue; const k = lerp(1, 1 - scale, 1 - dist / range), step = p.pos.clone().sub(p.prev).multiplyScalar(k); p.prev.copy(p.pos).sub(step); } };
+  },
+  C_OP_MaintainSequentialPath(d) {
+    const params = d.m_PathParams, n = Math.max(1, d.m_flNumToAssign ?? 100), loop = d.m_bLoop !== false;
+    return (ps, dt, s) => { ps.forEach((p, i) => { const t = p.pathT ?? (n > 1 ? (i % n) / (loop ? n : n - 1) : 0); p.pos.copy(pathPoint(params, t, s)); p.prev.copy(p.pos); }); };
+  },
+  C_OP_Orient2DRelToCP(d) {
+    const cp = d.m_nCP ?? 0, off = (d.m_flRotOffset ?? 0) * Math.PI / 180, spin = d.m_flSpinStrength ?? 1, out = field(d.m_nFieldOutput, F.Yaw);
+    return (ps, dt, s) => { const c = s.cp(cp).pos; for (const p of ps) { const v = c.clone().sub(p.pos); p.setS(out, lerp(p.getS(out), Math.atan2(v.y, v.x) + off, spin)); } };
+  },
+  C_OP_SetControlPointToCenter(d) {
+    const out = d.m_nCP1 ?? 1, off = vec(d.m_vecCP1Pos);
+    return (ps, dt, s) => { if (!ps.length) return; const c = new THREE.Vector3(); for (const p of ps) c.add(p.pos); s.setCP(out, c.divideScalar(ps.length).add(off)); };
+  },
+  C_OP_SetChildControlPoints(d) {
+    const group = d.m_nChildGroupID ?? 0, first = d.m_nFirstControlPoint ?? 0, count = d.m_nNumControlPoints ?? 1, src = d.m_nFirstSourcePoint ?? 0, orient = d.m_bSetOrientation;
+    return (ps, dt, s) => { const kids = s.sim.children.filter((c) => c.groupId === group); for (const k of kids) for (let i = 0; i < count; i++) { const p = ps[src + i]; if (p) k.state.override(first + i, p.pos, orient ? forwardBasis(p.normal) : null); } };
+  },
+  C_OP_RotateVector(d) {
+    const out = field(d.m_nFieldOutput, F.Normal), a0 = vec(d.m_vecRotAxisMin, [0, 0, 1]), a1 = vec(d.m_vecRotAxisMax, [0, 0, 1]), r0 = d.m_flRotRateMin ?? 180, r1 = d.m_flRotRateMax ?? 180, normalize = d.m_bNormalize;
+    return (ps, dt, s, str) => { for (const p of ps) { const ax = a0.clone().lerp(a1, hash(p.uid, 61)).normalize(), q = new THREE.Quaternion().setFromAxisAngle(ax, lerp(r0, r1, hash(p.uid, 62)) * Math.PI / 180 * dt * str); const v = p.getV(out).applyQuaternion(q); if (normalize) v.normalize(); } };
+  },
+  C_OP_SetVec(d) { const v = vector(d.m_InputValue), out = field(d.m_nOutputField, F.Color); return (ps, dt, s) => { for (const p of ps) p.setV(out, v(p, s).clone()); }; },
+  // Lights, end caps (the effect's end, not played here), speed-to-CP links: nothing to draw.
+  C_OP_RemapSpeedtoCP: () => () => {},
+  C_OP_EndCapTimedDecay: () => () => {},
+  C_OP_LerpEndCapScalar: () => () => {},
+  C_OP_RemapSpeed: () => () => {},
+  C_OP_SelectivelyEnableChildren: () => () => {},
+  C_OP_RenderDeferredLight: () => () => {},
 };
 
 const EMIT = {
@@ -489,8 +652,13 @@ export class Simulation {
       const cd = lib.system(c.m_ChildRef); if (!cd) continue;
       const child = new Simulation(cd, lib, this.root, this.state); child.delay = c.m_flDelay ?? 0; this.children.push(child);
     }
-    this.delay = 0;
+    this.delay = 0; this.stopped = false;
   }
+  // No more particles from here on (the effect's animation ended): those alive live out their lives.
+  stopEmission() { for (const sim of this.all()) sim.stopped = true; }
+  get finished() { return this.stopped && this.count() === 0; }
+  // Takes this system's meshes out of the scene (an effect that has run its course).
+  dispose() { for (const sim of this.all()) for (const r of sim.renderers) r.dispose(); }
   emit(ageAtSpawn) {
     if (this.particles.length >= this.maxParticles) return;
     const p = new Particle(this.constants); p.sys = this.state; p.uid = this.emitted++; p.id = p.uid; p.index = this.particles.length;
@@ -516,7 +684,7 @@ export class Simulation {
     const s = this.state; this.dt = dt; s.age += dt;
     for (const p of this.particles) p.age = s.age - p.created;
     for (const o of this.pre) { const k = o.strength(s); if (k > 0) o.fn(this.particles, dt, s, k); }
-    for (const e of this.emitters) e.fn.emit(dt, s, (age) => this.emit(age));
+    if (!this.stopped) for (const e of this.emitters) e.fn.emit(dt, s, (age) => this.emit(age));
     for (const o of this.ops) { const k = o.strength(s); if (k > 0) o.fn(this.particles, dt, s, k); }
     if (this.particles.some((p) => p.dead)) this.particles = this.particles.filter((p) => !p.dead);
     this.particles.forEach((p, i) => { p.index = i; });
@@ -583,6 +751,7 @@ class QuadBatch {
     for (let k = 0; k < 4; k++) { this.pos.set([corners[k].x, corners[k].y, corners[k].z], i * 12 + k * 3); const c = Array.isArray(color[0]) ? color[k] : color; this.col.set(this.linear ? [lin(c[0]), lin(c[1]), lin(c[2]), c[3]] : c, i * 16 + k * 4); this.ua.set(uvA, i * 16 + k * 4); this.ub.set(uvB, i * 16 + k * 4); this.bl[i * 4 + k] = blend; }
   }
   end() { const g = this.mesh.geometry; g.setDrawRange(0, this.n * 6); for (const k of ['position', 'color', 'uvA', 'uvB', 'blend']) g.attributes[k].needsUpdate = true; }
+  dispose() { this.mesh.removeFromParent(); this.mesh.geometry.dispose(); this.mesh.material.dispose(); }
 }
 function sheetFrame(info, p, rate, type) {
   const seqs = info?.sequences; if (!seqs?.length) return null;
@@ -605,6 +774,7 @@ function billboard(camera, groupInverse) {
   return { right, up, eye };
 }
 class SpriteRenderer {
+  dispose() { this.batch.dispose(); }
   constructor(r, lib, sim) {
     const t = lib.texture(r); this.info = t.info; this.batch = new QuadBatch(lib.group, t.texture, r, sim.maxParticles); this.rate = r.m_flAnimationRate ?? 0.1; this.type = r.m_nAnimationType;
     this.orient = r.m_nOrientationType; this.radiusScale = number(r.m_flRadiusScale, 1); this.alphaScale = number(r.m_flAlphaScale, 1);
@@ -639,6 +809,7 @@ class SpriteRenderer {
   }
 }
 class TrailRenderer {
+  dispose() { this.batch.dispose(); }
   constructor(r, lib, sim) {
     const t = lib.texture(r); this.info = t.info; this.batch = new QuadBatch(lib.group, t.texture, r, sim.maxParticles); this.min = r.m_flMinLength ?? 0; this.max = r.m_flMaxLength ?? 2000;
     this.radiusScale = number(r.m_flRadiusScale, 1); this.tail = number(r.m_flTailAlphaScale, 1); this.head = number(r.m_flHeadAlphaScale, 1); this.ignoreDT = r.m_bIgnoreDT;
@@ -665,6 +836,7 @@ class TrailRenderer {
   }
 }
 class RopeRenderer {
+  dispose() { this.batch.dispose(); }
   constructor(r, lib, sim) {
     const t = lib.texture(r); this.batch = new QuadBatch(lib.group, t.texture, r, sim.maxParticles); this.radiusScale = number(r.m_flRadiusScale, 1);
     this.vWorld = r.m_flTextureVWorldSize ?? 10; this.vScroll = r.m_flTextureVScrollRate ?? 0; this.info = t.info;
@@ -683,11 +855,41 @@ class RopeRenderer {
   }
 }
 
+// C_OP_RenderModels: a model per particle at its position, turned by its orientation (or yaw,
+// pitch, roll), scaled by its radius (1 is the model's own size), animated by its age.
+const GLTF_TO_SOURCE = SOURCE_TO_GLTF.clone().invert();
+class ModelRenderer {
+  constructor(r, lib, sim) {
+    this.lib = lib; this.list = (r.m_ModelList || []).map((m) => m.m_model).filter(Boolean); this.activity = r.m_ActivityName || null; this.animated = r.m_bAnimated;
+    this.rate = (r.m_flAnimationRate ?? 30) / 30; this.instances = new Map();
+  }
+  update(ps, s) {
+    const alive = new Set();
+    for (const p of ps) {
+      let inst = this.instances.get(p);
+      if (!inst) {
+        const m = this.lib.models.get(this.list[p.uid % Math.max(1, this.list.length)], this.activity, s.sim.def._path); if (!m) continue;
+        const mixer = this.animated && m.clip ? new THREE.AnimationMixer(m.scene) : null; if (mixer) mixer.clipAction(m.clip).play();
+        m.scene.matrixAutoUpdate = false; this.lib.group.add(m.scene); inst = { scene: m.scene, mixer }; this.instances.set(p, inst);
+      }
+      alive.add(p);
+      const q = p.orient || qangle(p.rot.y, p.rot.x, p.rot.z), r = Math.max(1e-4, p.radius);
+      inst.scene.matrix.compose(p.pos, q, new THREE.Vector3(r, r, r)).multiply(GLTF_TO_SOURCE); inst.scene.matrixWorldNeedsUpdate = true; inst.scene.visible = p.alpha > 0.01;
+      if (inst.mixer) inst.mixer.setTime(p.age * this.rate);
+    }
+    for (const [p, inst] of this.instances) if (!alive.has(p)) { this.lib.group.remove(inst.scene); this.instances.delete(p); }
+  }
+  dispose() { for (const inst of this.instances.values()) this.lib.group.remove(inst.scene); this.instances.clear(); }
+}
+
 export class Library {
   // systems: { path: definition }; textures: { vtex: { file, sequences } }; url(file) gives a texture's address.
-  constructor({ systems, textures, snapshots, url, options = {} }) {
+  // models (optional): { get(vmdl) → { scene, clip } } gives the models of C_OP_RenderModels.
+  constructor({ systems, textures, snapshots, url, models = null, options = {} }) {
+    this.models = models;
     this.options = options; this.systems = systems; this.textures = textures; this.snapshots = snapshots; this.url = url; this.cache = new Map(); this.unsupported = new Set();
     this.group = new THREE.Group(); this.group.matrixAutoUpdate = false; this.group.matrix.copy(SOURCE_TO_GLTF); this.loader = new THREE.TextureLoader();
+    for (const [path, def] of Object.entries(systems || {})) if (def && !def._path) Object.defineProperty(def, '_path', { value: path });
   }
   system(path) { const k = path.replace(/\.vpcf$/, ''), d = this.systems[k]; return d || null; }
   // Colour textures are read as sRGB, except for mod2x: its «modulate» textures are 50 % grey where
@@ -704,11 +906,13 @@ export class Library {
   }
   renderer(r, sim) {
     // A renderer whose texture did not come with the hero would draw bare squares: it is left out.
+    if (r._class === 'C_OP_RenderModels') return this.models ? new ModelRenderer(r, this, sim) : null;
     if (!this.texture(r).texture) return null;
     switch (r._class) {
       case 'C_OP_RenderSprites': return r.m_bRefract ? null : new SpriteRenderer(r, this, sim);
       case 'C_OP_RenderTrails': return new TrailRenderer(r, this, sim);
       case 'C_OP_RenderRopes': return new RopeRenderer(r, this, sim);
+      case 'C_OP_RenderDeferredLight': return null;
       default: this.unsupported.add(r._class); return null;
     }
   }

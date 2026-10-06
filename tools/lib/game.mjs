@@ -133,3 +133,23 @@ export function scopeProps(dump, names) {
   }
   return props;
 }
+
+// Particle effects an animation starts and stops by its events: AE_CL_CREATE_PARTICLE_EFFECT_CFG
+// (the system's own control point configuration by name), AE_CL_CREATE_PARTICLE_EFFECT (control
+// points 0 and 1 at attachments given in the event) and AE_CL_STOP_PARTICLE_EFFECT.
+export function particleEvents(dump, names) {
+  const owners = [...dump.matchAll(/\n\t\t\tm_s?[Nn]ame = "([^"]+)"/g)].map((m) => [m.index, m[1]]), wanted = new Set(names), events = [], seen = new Set();
+  for (const m of dump.matchAll(/\n(\t+)\{\n\1\tm_nFrame = (-?\d+)([\s\S]*?)\n\1\}/g)) {
+    const body = m[3], type = /m_sEventName = "(AE_CL_(?:CREATE|STOP)_PARTICLE_EFFECT(?:_CFG)?)"/.exec(body)?.[1]; if (!type) continue;
+    const owner = owners.filter(([i]) => i < m.index).pop()?.[1]?.replace(/^@+/, ''); if (!wanted.has(owner)) continue;
+    const system = /name = resource:"([^"]+)\.vpcf"/.exec(body)?.[1]; if (!system) continue;
+    const str = (k) => new RegExp(`\\b${k} = "([^"]*)"`).exec(body)?.[1] ?? null, bool = (k) => new RegExp(`\\b${k} = true`).test(body);
+    const e = { sequence: owner, cycle: +(/m_flCycle = ([-\d.e]+)/.exec(body)?.[1] ?? 0), system };
+    if (type === 'AE_CL_STOP_PARTICLE_EFFECT') Object.assign(e, { stop: true, instantly: bool('stop_instantly') });
+    else if (type === 'AE_CL_CREATE_PARTICLE_EFFECT_CFG') Object.assign(e, { config: str('config') || '', stopOnSeqChange: bool('stop_on_seq_change') });
+    else Object.assign(e, { stopOnSeqChange: bool('stop_on_seq_change'), points: [[str('attachment_point'), str('attachment_type')], [str('attachment_point_cp1'), str('attachment_type_cp1')]] });
+    const key = JSON.stringify(e); if (seen.has(key)) continue;
+    seen.add(key); events.push(e);
+  }
+  return events;
+}

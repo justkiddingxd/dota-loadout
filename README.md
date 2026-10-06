@@ -63,6 +63,10 @@ The canvas is transparent: put any background behind it.
 - **Animations.** For every activity the plainest sequence is kept (loadout, idle, run, attacks,
   abilities, teleport, victory, taunt, death…); the loadout spawn plays once on load.
 - **Items.** The default wearables are bone-merged onto the hero's skeleton, like the game does.
+- **Animation events.** Effects the animations start and stop at their frames
+  (AE_CL_CREATE_PARTICLE_EFFECT…), with each system's own control point configuration, and props
+  they bring in (AE_CL_CREATE_ANIM_SCOPE_PROP: Pudge's clown car). Models drawn by particles
+  (C_OP_RenderModels: Arc Warden's taunt cane and hat) play their own clips.
 - **Particles.** The default items' effects: Source 2 particle systems ported from
   [Source 2 Viewer](https://github.com/ValveResourceFormat/ValveResourceFormat) with model-bound
   operators (snapshots skinned to bones, attachments, control point drivers) — see `src/fx.js`.

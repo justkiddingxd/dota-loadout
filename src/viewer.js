@@ -182,7 +182,8 @@ async function buildHero(manifest, url, manager, time, light) {
   // The models are packed with EXT_meshopt_compression (tools/compress.mjs).
   const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
   const names = Object.keys(manifest.models), loaded = Object.fromEntries(await Promise.all(names.map(async (k) => [k, await loader.loadAsync(url(manifest.models[k]))])));
-  const propFiles = [...new Set((manifest.props || []).map((p) => p.file))], propModels = Object.fromEntries(await Promise.all(propFiles.map(async (f) => [f, await loader.loadAsync(url(f))])));
+  const propFiles = [...new Set([...(manifest.props || []).map((p) => p.file), ...Object.values(manifest.fxModels || {}).map((m) => m.file)])];
+  const propModels = Object.fromEntries(await Promise.all(propFiles.map(async (f) => [f, await loader.loadAsync(url(f))])));
   const heroModel = loaded.hero, root = heroModel.scene, bones = {}, inverses = {};
 
   // Items follow the hero's skeleton by bone name, as the game bone-merges them; an item's own
@@ -245,7 +246,21 @@ async function buildHero(manifest, url, manager, time, light) {
   if (a.entry && clips.has(a.entry)) { start(a.entry, 0); mixer.update(0); }
 
   // ---- effects: the hero's particles with their own control point drivers, in the game's space.
-  const lib = new Library({ systems: manifest.systems || {}, textures: manifest.textures || {}, snapshots: manifest.snapshots || {}, url: (file) => url(`fx/${file}`) });
+  // Models drawn by particles (C_OP_RenderModels) are copies of the hero's fx models, dressed alike.
+  const fxModels = {
+    // The clip: the one named most like the effect (Arc Warden's …_hat_start effect plays the hat's
+    // …_hat_start, its …_hat_start_loadout the …_loadout one, whatever activities they name), else
+    // the one of the renderer's activity.
+    get(path, activity, system) {
+      const info = manifest.fxModels?.[path], source = info && propModels[info.file]; if (!source) return null;
+      const scene = cloneSkinned(source.scene); dress(scene); scene.traverse((o) => { o.castShadow = false; });
+      const words = (system || '').split('/').pop().split('_'), tail = (name) => { const w = name.split('_'); let k = 0; while (k < w.length && k < words.length && w[w.length - 1 - k] === words[words.length - 1 - k]) k++; return k; };
+      const named = source.animations.map((c) => [c, tail(c.name)]).sort((a, b) => b[1] - a[1])[0];
+      const clip = named && named[1] >= 2 ? named[0] : source.animations.find((c) => c.name === info.clips?.[activity]) || source.animations[0] || null;
+      return { scene, clip };
+    },
+  };
+  const lib = new Library({ systems: manifest.systems || {}, textures: manifest.textures || {}, snapshots: manifest.snapshots || {}, url: (file) => url(`fx/${file}`), models: fxModels });
   lib.loader.manager = manager;
   const attachment = (name, owner) => { for (const model of [owner, 'hero', ...items]) { const at = manifest.attachments?.[model]?.[name]; if (at) return at; } return null; };
   const attachmentMatrix = (at) => { const bone = bones[at.bones[0].toLowerCase()]; if (!bone) return null;
@@ -263,33 +278,86 @@ async function buildHero(manifest, url, manager, time, light) {
       return total ? out.divideScalar(total).applyMatrix4(groupInverse) : pos.clone();
     },
   };
-  const effects = (manifest.effects || []).map((e) => { const def = manifest.systems?.[e.system]; if (!def) return null; const sim = new Simulation(def, lib); sim.model = model;
-    return { sim, owner: e.owner, drivers: def.m_controlPointConfigurations?.[0]?.m_drivers || [] }; }).filter(Boolean);
-  const drive = () => {
-    const origin = toSource(root.matrixWorld.clone());
-    for (const e of effects) {
-      const cps = e.sim.cps; cps.clear();
-      const set = (i, m) => { const c = { pos: new THREE.Vector3(), quat: new THREE.Quaternion(), matrix() { return new THREE.Matrix4().compose(this.pos, this.quat, new THREE.Vector3(1, 1, 1)); } }; m.decompose(c.pos, c.quat, new THREE.Vector3()); cps.set(i, c); };
-      set(0, origin);
-      for (const d of e.drivers) {
-        const i = d.m_iControlPoint ?? 0, type = d.m_iAttachType || 'PATTACH_ABSORIGIN_FOLLOW';
-        if (type === 'PATTACH_WORLDORIGIN') { set(i, new THREE.Matrix4()); continue; }
-        const at = d.m_attachmentName && attachment(d.m_attachmentName, e.owner), m = at && attachmentMatrix(at); set(i, m || origin);
-      }
-    }
-  };
 
+  // Control points from a system's drivers: at the hero's origin or an attachment, following it or
+  // fixed where it was when the effect started, plus the driver's offset. The world origin is the
+  // hero's (he stands at it on the loadout page): it turns with him, and its offset — often a value,
+  // not a place (Arc Warden's CP 7 = 1, 1, 1 scales his taunt props) — is added unturned.
+  // The hero's origin as a control point: his turn on the turntable, in the game's axes (facing +x,
+  // z up) — the conversion to glTF taken out on both sides, not only before.
+  const heroOrigin = () => toSource(root.matrixWorld.clone()).multiply(SOURCE_TO_GLTF);
+  const driverOf = (d) => ({ cp: d.m_iControlPoint ?? 0, type: d.m_iAttachType || 'PATTACH_ABSORIGIN_FOLLOW', attachment: d.m_attachmentName || null, offset: d.m_vecOffset ? new THREE.Vector3(...d.m_vecOffset) : null });
+  const configs = (def) => def.m_controlPointConfigurations || [];
+  const driversFor = (def, config) => {
+    const named = config != null && configs(def).find((c) => c.m_name === config);
+    if (named) return (named.m_drivers || []).map(driverOf);
+    // An event's config that the system lacks names an attach type (absorigin, point_follow…).
+    if (config && /^(absorigin|point|world)/.test(config)) return [{ cp: 0, type: `PATTACH_${config.replace(/^point/, 'point').toUpperCase()}`, attachment: null, offset: null }];
+    return (configs(def)[0]?.m_drivers || []).map(driverOf);
+  };
+  const cpOf = (m) => { const c = { pos: new THREE.Vector3(), quat: new THREE.Quaternion(), matrix() { return new THREE.Matrix4().compose(this.pos, this.quat, new THREE.Vector3(1, 1, 1)); } }; m.decompose(c.pos, c.quat, new THREE.Vector3()); return c; };
+  const placeCP = (d, owner, origin) => {
+    if (d.type === 'PATTACH_WORLDORIGIN') { const c = cpOf(origin); if (d.offset) c.pos.add(d.offset); return c; }
+    const at = /POINT|CENTER/.test(d.type) && d.attachment ? attachment(d.attachment, owner) : null, c = cpOf((at && attachmentMatrix(at)) || origin);
+    if (d.offset) c.pos.add(d.offset.clone().applyQuaternion(c.quat));
+    return c;
+  };
+  const follows = (d) => /FOLLOW|WORLDORIGIN/.test(d.type);
+  const instance = (def, owner, drivers) => {
+    const sim = new Simulation(def, lib); sim.model = model;
+    const e = { sim, owner, drivers, fixed: new Map() }, origin = heroOrigin();
+    for (const d of drivers) if (!follows(d)) e.fixed.set(d.cp, placeCP(d, owner, origin));
+    return e;
+  };
+  const drive = (e, origin) => {
+    const cps = e.sim.cps; cps.clear(); cps.set(0, cpOf(origin));
+    for (const d of e.drivers) cps.set(d.cp, e.fixed.get(d.cp) || placeCP(d, e.owner, origin));
+  };
+  const effects = (manifest.effects || []).map((e) => { const def = manifest.systems?.[e.system]; return def ? instance(def, e.owner, driversFor(def, null)) : null; }).filter(Boolean);
+
+  // Effects the animations start and stop by their events, at their moments in the animation.
+  const events = manifest.events || [], live = [];
+  const fire = (ev) => {
+    if (ev.stop) { for (const e of live) if (e.system === ev.system) { e.sim.stopEmission(); if (ev.instantly) e.kill = true; } return; }
+    const def = manifest.systems?.[ev.system]; if (!def) return;
+    const drivers = ev.points ? ev.points.map(([att, type], cp) => att || cp === 0 ? { cp, type: type || (att ? 'PATTACH_POINT_FOLLOW' : 'PATTACH_ABSORIGIN_FOLLOW'), attachment: att, offset: null } : null).filter(Boolean) : driversFor(def, ev.config);
+    live.push(Object.assign(instance(def, 'hero', drivers), { system: ev.system, sequence: ev.sequence, stopOnSeqChange: ev.stopOnSeqChange, born: 0 }));
+  };
+  let lastName = null, lastTime = 0;
+  const schedule = () => {
+    if (!current) return;
+    const duration = current.getClip().duration || 1, now = current.time;
+    if (currentName !== lastName) {
+      // A new animation: those of the last one that end with it stop making particles.
+      for (const e of live) if (e.sequence === lastName && e.stopOnSeqChange !== false) e.sim.stopEmission();
+      lastName = currentName; lastTime = -1e-6;
+    }
+    // Events between the last frame and this one; a loop that wrapped around fires the rest of the
+    // previous pass and the start of this one.
+    const from = lastTime, wrapped = now < from;
+    for (const ev of events) {
+      if (ev.sequence !== currentName) continue; const at = ev.cycle * duration;
+      if (wrapped ? at > from || at <= now : at > from && at <= now) fire(ev);
+    }
+    lastTime = now;
+  };
   return {
-    turntable, lib, box, heroBox, effects, animations: list.map((x) => ({ ...x, loop: loops.has(x.name), duration: clips.get(x.name).duration })),
+    turntable, lib, box, heroBox, effects, live, animations: list.map((x) => ({ ...x, loop: loops.has(x.name), duration: clips.get(x.name).duration })),
     play: (name) => start(name),
     update(dt, camera) {
       mixer.update(dt);
       // A later event with the same model in the same animation takes over (Ringmaster's box: built, then broken).
       for (const p of props) p.at = currentName === p.sequence && current ? current.time - p.frame / 30 : -1;
       for (const p of props) { const later = props.some((q) => q !== p && q.file === p.file && q.sequence === p.sequence && q.frame > p.frame && q.at >= 0); p.scene.visible = p.at >= 0 && !later; if (p.scene.visible) p.mixer.setTime(p.at); }
-      turntable.updateMatrixWorld(true); drive();
-      for (const e of effects) e.sim.update(dt);
-      for (const e of effects) e.sim.render(camera, groupInverse);
+      turntable.updateMatrixWorld(true); schedule();
+      const origin = heroOrigin();
+      for (const e of effects) drive(e, origin);
+      for (const e of live) drive(e, origin);
+      for (const e of [...effects, ...live]) e.sim.update(dt);
+      // Spent effects go: stopped and empty, killed, or long past (a stray endless one).
+      for (let i = live.length - 1; i >= 0; i--) { const e = live[i]; e.born += dt;
+        if (e.kill || e.sim.finished || e.born > 20 || (e.born > 0.5 && e.sim.count() === 0 && e.sequence !== currentName)) { e.sim.dispose(); live.splice(i, 1); } }
+      for (const e of [...effects, ...live]) e.sim.render(camera, groupInverse);
     },
     // The rectangle the hero covers on screen (normalized device coordinates), with a small margin.
     screenBox(camera) {
