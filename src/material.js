@@ -31,7 +31,10 @@ export function heroMaterial(m, texture, time, light, cube = null) {
     alphaTest: m.alphaTest || 0, transparent: !!(m.translucent || m.additive), depthWrite: !(m.translucent || m.additive), side: THREE.DoubleSide,
   });
   // F_ADDITIVE_BLEND: glow layers (weapons, wings, Visage's spectral body) add to what lies behind.
-  if (m.additive) material.blending = THREE.AdditiveBlending;
+  // The canvas is see-through (the page shows behind it): adding light must not add alpha too, or
+  // a glow's dark edges turn the page behind them into the scene's black (Terrorblade's sword planes
+  // as dark stars).
+  if (m.additive) Object.assign(material, { blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.SrcAlphaFactor, blendDst: THREE.OneFactor, blendSrcAlpha: THREE.ZeroFactor, blendDstAlpha: THREE.OneFactor });
   const uniforms = {
     ...light, tMasks: { value: m.masks ? texture(m.masks) : BLACK }, tSpec: { value: m.specular ? texture(m.specular) : BLACK },
     tDetail: { value: m.detail ? texture(m.detail, true) : BLACK }, tFresnel: { value: m.fresnel ? texture(m.fresnel) : GREY }, uTime: time,
