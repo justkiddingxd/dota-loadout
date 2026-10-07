@@ -9,7 +9,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { join, resolve } from 'node:path';
 import { readGlb } from './lib/files.mjs';
 import { loadCosmetics, loadGame } from './lib/game.mjs';
-import { prismaticColors, takesPrismatic } from './lib/gems.mjs';
+import { prismaticColors, SOCKETED, takesPrismatic } from './lib/gems.mjs';
 import { buildItem } from './lib/item.mjs';
 
 const args = process.argv.slice(2), opt = (name, fallback) => { const i = args.indexOf(`--${name}`); return i < 0 ? fallback : args[i + 1]; }, flag = (name) => args.includes(`--${name}`);
@@ -58,7 +58,7 @@ for (const hero of list) {
     version: 1,
     slots: c.slots.filter((s) => ok.some((i) => i.slot === s.name)).map((s) => ({ name: s.name, text: s.text, ...(/_persona_(\d+)$/.test(s.name) ? { persona: +/_persona_(\d+)$/.exec(s.name)[1] } : {}), items: ok.filter((i) => i.slot === s.name).sort((a, b) => b.default - a.default || b.id - a.id).map((i) => i.id) })),
     items: Object.fromEntries(ok.map((i) => [i.id, { name: i.name, slot: i.slot, rarity: i.rarity, default: i.default || undefined, set: i.set || undefined,
-      prismatic: (!i.default && takesPrismatic(manifests[i.id])) || undefined,
+      prismatic: (!i.default && (SOCKETED[i.id] || takesPrismatic(manifests[i.id]))) || undefined,
       unusual: manifests[i.id].unusual?.map((u) => ({ id: u.id, name: u.name })),
       styles: manifests[i.id].styles.map((s) => ({ name: s.name, icon: s.icon, ...(s.form ? { form: s.form } : {}) })) }])),
     sets: c.sets.map((s) => ({ ...s, items: s.items.filter((id) => manifests[id]) })).filter((s) => s.items.length > 1),

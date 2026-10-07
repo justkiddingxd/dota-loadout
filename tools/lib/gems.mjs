@@ -13,6 +13,10 @@ export function prismaticColors(game) {
     .map(([key, c]) => { const k = (c.color_name || '').toLowerCase(); return { key: key.replace(/^unusual_/, ''), hex: c.hex_color.toLowerCase(), name: { en: en[k] || key, ru: ru[k] || en[k] || key } }; });
 }
 
+// The gem an item comes with, which the game always draws it in (the schema does not say: it was put
+// in each one sold). Terrorblade's arcana: Reflection's Shade, his red.
+export const SOCKETED = { 5957: 'terrorblade_abysm' };
+
 // Whether an item's manifest (item.json) takes a gem: one of its own effects reads CP 15, the game's
 // recolouring (older effects, Shadow Fiend's Desolation, do not: the game takes no gem in them).
 // Unusual effects are left out: they are the item's other socket.
