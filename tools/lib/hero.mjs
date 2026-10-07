@@ -31,11 +31,11 @@ export async function buildHero({ game, cli, hero, out, temp, log = () => {} }) 
   const has = (path) => existsSync(join(game, `${path}_c`));
   const run = async (args) => (await exec(cli, args, { encoding: 'utf8', maxBuffer: 1 << 30 })).stdout;
   const decompile = async (path, target) => { mkdirSync(dirname(target), { recursive: true }); await run(['-i', join(game, `${path}_c`), '--game', gameinfo, '-d', '-o', target]); };
-  // A hero's catalog of items (tools/build-items.mjs) outlives his rebuild.
-  const catalog = join(out, 'items.json'), kept = existsSync(catalog) ? readFileSync(catalog) : null;
+  // A hero's catalog of items (tools/build-items.mjs) and pictures (tools/build-portraits.mjs) outlive his rebuild.
+  const kept = ['items.json', 'card.webp', 'portrait.webp', 'icon.webp'].map((f) => [join(out, f), existsSync(join(out, f)) ? readFileSync(join(out, f)) : null]);
   rmSync(out, { recursive: true, force: true }); rmSync(temp, { recursive: true, force: true });
   for (const d of ['models', 'textures', 'fx']) mkdirSync(join(out, d), { recursive: true });
-  if (kept) writeFileSync(catalog, kept);
+  for (const [file, data] of kept) if (data) writeFileSync(file, data);
   mkdirSync(temp, { recursive: true });
 
   // ---------------------------------------------------------------- models and animations
