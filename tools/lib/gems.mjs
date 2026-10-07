@@ -1,6 +1,5 @@
 // Prismatic gems: the colours the game has for them (items_game.txt's colors, unusual_*, named in
-// the localization), and which items take one — those whose effects read a gem's colour (control
-// point 15, turned on by CP 16).
+// the localization), and which items take one.
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseKV, tokens } from './kv1.mjs';
@@ -13,16 +12,9 @@ export function prismaticColors(game) {
     .map(([key, c]) => { const k = (c.color_name || '').toLowerCase(); return { key: key.replace(/^unusual_/, ''), hex: c.hex_color.toLowerCase(), name: { en: en[k] || key, ru: ru[k] || en[k] || key } }; });
 }
 
-// The gem an item comes with, which the game always draws it in (the schema does not say: it was put
-// in each one sold). Terrorblade's arcana: Reflection's Shade, his red.
-export const SOCKETED = { 5957: 'terrorblade_abysm' };
-
-// Whether an item's manifest (item.json) takes a gem: one of its own effects reads CP 15, the game's
-// recolouring (older effects, Shadow Fiend's Desolation, do not: the game takes no gem in them).
-// Unusual effects are left out: they are the item's other socket.
-export const takesPrismatic = (manifest) => {
-  const systems = manifest.systems || {}, unusual = new Set();
-  const reach = (path) => { if (unusual.has(path) || !systems[path]) return; unusual.add(path); for (const c of systems[path].m_Children || []) reach(String(c.m_ChildRef || '').replace(/\.vpcf$/, '')); };
-  for (const u of manifest.unusual || []) reach(u.system);
-  return Object.entries(systems).some(([path, s]) => !unusual.has(path) && /"m_nCPInput":15\b/.test(JSON.stringify(s))) || null;
-};
+// The items with a prismatic socket: next to none (Valve's list). The key is the gem it comes with,
+// which the game always draws it in (the schema does not say: it was put in each one sold); true, an
+// empty socket. Other items whose effects read a gem's colour (control point 15) take their hero's:
+// Terrorblade's skins, his arcana's. Witch Doctor's Padda'pon of Ribbi'tar has one too, for Death
+// Ward's effect, which the site does not show.
+export const SOCKETS = { 5957: 'terrorblade_abysm', 6879: 'techies_swine' };
