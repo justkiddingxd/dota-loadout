@@ -283,7 +283,7 @@ export function loadCosmetics(game) {
     const visuals = item.visuals || {}, modifiers = Object.entries(visuals).filter(([k, m]) => /^asset_modifier/.test(k) && m && typeof m === 'object').map(([, m]) => m);
     const styleKeys = visuals.styles ? Object.keys(visuals.styles).sort((a, b) => a - b) : [null], persona = modifiers.find((m) => m.type === 'persona')?.persona;
     const styles = styleKeys.map((s) => {
-      const style = s === null ? {} : visuals.styles[s], mine = modifiers.filter((m) => m.style === undefined || m.style === s);
+      const style = s === null ? {} : visuals.styles[s], mine = modifiers.filter((m) => m.style === undefined || m.style === (s ?? '0'));
       const model = style.model_player || item.model_player;
       const icon = (style.alternate_icon !== undefined && visuals.alternate_icons?.[style.alternate_icon]?.icon_path) || item.image_inventory;
       const pairs = (type) => Object.fromEntries(mine.filter((m) => m.type === type && m.asset && m.modifier).map((m) => [m.asset.replace(/\.vpcf$/, ''), m.modifier.replace(/\.vpcf$/, '')]));

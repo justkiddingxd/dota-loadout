@@ -6,11 +6,14 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 import { Library, Simulation, SOFT, SOURCE_TO_GLTF } from './fx.js';
+import { Bloom } from './bloom.js';
 import { heroMaterial } from './material.js';
 
 // Tone mapping: each channel stays as it is up to the knee and rolls off softly toward 1 above it,
 // so bright fire goes yellow and white like in the game, without the hard edge of clipping.
 const KNEE = 0.75;
+// Bloom: how much of the halo of what is brighter than white is added (options.bloom; false for none).
+const BLOOM = 0.35;
 // Light of the loadout page when a hero has no portrait of his own.
 const DEFAULT_LIGHTING = {
   light: { angles: [50, 145, 0], color: [234, 243, 254], scale: 1.45 }, ambient: { angles: [-27, -114, 24], color: [79, 93, 93], scale: 5 },
@@ -29,7 +32,8 @@ export class HeroViewer {
   // options: controls — true (drag anywhere), 'hero' (only a drag that starts on the hero; the rest
   // goes on to the page) or false; wheel — 'zoom', 'turn' or false; framing — 'hero' (the hero,
   // with what fits of the pedestal) or 'full' (hero and pedestal whole); pixelRatio; textureScale (1, or
-  // 0.5 by default on phones and machines of 4 GB or less); onProgress(loaded, total); onAnimation(name).
+  // 0.5 by default on phones and machines of 4 GB or less); bloom (its strength, 0.35, or false);
+  // onProgress(loaded, total); onAnimation(name). Set paused to stand the hero and his effects still.
   constructor(canvas, options = {}) {
     this.canvas = canvas; this.options = { controls: true, wheel: 'zoom', framing: 'hero', ...options };
     // Phones and small machines get textures at half size: a quarter of the memory, unseen on their screens.
@@ -44,12 +48,17 @@ export class HeroViewer {
     // Soft particles (options.softParticles, on by default): the scene's depth without the effects,
     // at half size, for the effects to fade against.
     this.soft = this.options.softParticles !== false ? { target: new THREE.WebGLRenderTarget(1, 1, { depthTexture: new THREE.DepthTexture(1, 1) }), material: new THREE.MeshBasicMaterial({ colorWrite: false }) } : null;
+    this.bloom = this.options.bloom !== false ? new Bloom() : null;
+    // The halo goes where the scene is see-through too (its alpha with it): a glow over the page.
     this.output = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({
-      uniforms: { tScene: { value: this.hdr.texture }, uKnee: { value: KNEE } }, depthTest: false, depthWrite: false, blending: THREE.NoBlending, toneMapped: false,
+      uniforms: { tScene: { value: this.hdr.texture }, uKnee: { value: KNEE }, tBloom: { value: this.bloom?.texture ?? null }, uBloom: { value: this.bloom ? this.options.bloom ?? BLOOM : 0 } },
+      depthTest: false, depthWrite: false, blending: THREE.NoBlending, toneMapped: false,
       vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
-      fragmentShader: `uniform sampler2D tScene; uniform float uKnee; varying vec2 vUv;
+      fragmentShader: `uniform sampler2D tScene, tBloom; uniform float uKnee, uBloom; varying vec2 vUv;
 void main() {
-  gl_FragColor = texture2D(tScene, vUv); vec3 over = max(gl_FragColor.rgb - uKnee, 0.0), room = vec3(1.0 - uKnee);
+  gl_FragColor = texture2D(tScene, vUv);
+  if (uBloom > 0.0) { vec3 b = texture2D(tBloom, vUv).rgb * uBloom; gl_FragColor.rgb += b; gl_FragColor.a = max(gl_FragColor.a, clamp(max(b.r, max(b.g, b.b)), 0.0, 1.0)); }
+  vec3 over = max(gl_FragColor.rgb - uKnee, 0.0), room = vec3(1.0 - uKnee);
   gl_FragColor.rgb = min(gl_FragColor.rgb, vec3(uKnee)) + room * (1.0 - exp(-over / room));
   #include <colorspace_fragment>
 }`,
@@ -131,7 +140,7 @@ void main() {
   // ---- camera: the framing at any shape of the canvas.
   fit() {
     const { clientWidth: w, clientHeight: h } = this.canvas; if (!w || !h) return;
-    this.renderer.setSize(w, h, false); this.camera.aspect = w / h; const size = this.renderer.getDrawingBufferSize(new THREE.Vector2()); this.hdr.setSize(size.x, size.y);
+    this.renderer.setSize(w, h, false); this.camera.aspect = w / h; const size = this.renderer.getDrawingBufferSize(new THREE.Vector2()); this.hdr.setSize(size.x, size.y); this.bloom?.setSize(size.x, size.y);
     if (this.soft) { this.soft.target.setSize(Math.ceil(size.x / 2), Math.ceil(size.y / 2)); SOFT.uSceneSize.value.copy(size); }
     this.camera.fov = 30; this.camera.updateProjectionMatrix(); this.place();
   }
@@ -190,13 +199,15 @@ void main() {
       this.scene.overrideMaterial = null; r.shadowMap.autoUpdate = shadows; fx.visible = true;
       SOFT.tSceneDepth.value = this.soft.target.depthTexture; SOFT.uNear.value = this.camera.near; SOFT.uFar.value = this.camera.far; SOFT.uSoft.value = true;
     }
-    r.setRenderTarget(this.hdr); r.clear(); r.render(this.scene, this.camera); r.setRenderTarget(null); r.render(this.output, this.outputCamera);
+    r.setRenderTarget(this.hdr); r.clear(); r.render(this.scene, this.camera);
+    if (this.bloom) this.bloom.render(r, this.hdr);
+    r.setRenderTarget(null); r.render(this.output, this.outputCamera);
   }
 
   dispose() {
     this.loading++; this.renderer.setAnimationLoop(null); this.resize.disconnect(); this.intersection.disconnect(); this.unload();
     const c = this.canvas; c.removeEventListener('pointerdown', this.onDown); c.removeEventListener('pointermove', this.onMove); c.removeEventListener('pointerup', this.onUp); c.removeEventListener('pointercancel', this.onUp); c.removeEventListener('wheel', this.onWheel);
-    this.hdr.dispose(); if (this.soft) { this.soft.target.dispose(); this.soft.material.dispose(); SOFT.uSoft.value = false; } this.output.geometry.dispose(); this.output.material.dispose(); this.renderer.dispose();
+    this.hdr.dispose(); this.bloom?.dispose(); if (this.soft) { this.soft.target.dispose(); this.soft.material.dispose(); SOFT.uSoft.value = false; } this.output.geometry.dispose(); this.output.material.dispose(); this.renderer.dispose();
   }
 }
 
