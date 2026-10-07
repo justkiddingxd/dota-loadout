@@ -63,7 +63,7 @@ void main() {
     this.toLight = new THREE.Vector3(0, 1, 1).normalize(); this.ambientDir = new THREE.Vector3(0, 1, 0);
     this.sun = new THREE.DirectionalLight(0xffffff, 0); this.sun.castShadow = true; this.sun.shadow.mapSize.set(2048, 2048); this.sun.shadow.bias = -0.0005; this.sun.shadow.normalBias = 0.02;
     this.scene.add(this.sun, this.sun.target);
-    this.time = { value: 0 }; this.hero = null; this.loading = 0;
+    this.time = { value: 0 }; this.clock = 0; this.paused = false; this.hero = null; this.loading = 0;
     this.view = { center: new THREE.Vector3(0, 2, 0), distance: 10, zoom: 1, zoomTarget: 1 };
     this.turn = { angle: 0, target: 0, velocity: 0, dragging: null };
     this.listen();
@@ -174,12 +174,14 @@ void main() {
   zoom(value) { this.view.zoomTarget = THREE.MathUtils.clamp(value, 0.6, 3); }
 
   frame() {
-    this.timer.update(); const dt = Math.min(this.timer.getDelta(), 0.1); this.time.value = this.timer.getElapsed();
+    // Paused, the hero, his effects and his materials' clock stand still (the effects take a step too
+    // small to see, so that they still face the camera); the turntable and zoom go on.
+    this.timer.update(); const real = Math.min(this.timer.getDelta(), 0.1), dt = this.paused ? 1e-6 : real; this.clock += dt; this.time.value = this.clock;
     if (!this.visible || document.hidden || !this.hero) { if (!this.hero) { this.renderer.setRenderTarget(null); this.renderer.clear(); } return; }
     const t = this.turn;
-    if (!t.dragging) { t.target += t.velocity * dt; t.velocity *= Math.exp(-GLIDE * dt); }
-    t.angle += (t.target - t.angle) * (1 - Math.exp(-EASE * dt)); this.hero.turntable.rotation.y = t.angle;
-    if (Math.abs(this.view.zoomTarget - this.view.zoom) > 1e-4) { this.view.zoom += (this.view.zoomTarget - this.view.zoom) * (1 - Math.exp(-EASE * dt)); this.place(); }
+    if (!t.dragging) { t.target += t.velocity * real; t.velocity *= Math.exp(-GLIDE * real); }
+    t.angle += (t.target - t.angle) * (1 - Math.exp(-EASE * real)); this.hero.turntable.rotation.y = t.angle;
+    if (Math.abs(this.view.zoomTarget - this.view.zoom) > 1e-4) { this.view.zoom += (this.view.zoomTarget - this.view.zoom) * (1 - Math.exp(-EASE * real)); this.place(); }
     this.hero.update(dt, this.camera);
     const r = this.renderer;
     if (this.soft) {

@@ -1,6 +1,7 @@
 // The site's pictures of the heroes, from the game's panorama images: each hero's tall portrait of
 // the hero picker (card.webp), wide portrait (portrait.webp) and small icon (icon.webp) into his
-// folder, and the attributes' icons into <out>/attributes/.
+// folder, the attributes' icons into <out>/attributes/, and the prismatic gem's picture into <out>/gems/
+// (gem.webp, and gem-mask.webp: where and how its colour goes).
 //   node tools/build-portraits.mjs --game <…/dota> --cli <Source2Viewer-CLI> [--out assets]
 import { createCanvas, loadImage } from '@napi-rs/canvas';
 import { execFile } from 'node:child_process';
@@ -39,5 +40,8 @@ for (const h of heroes) {
 }
 mkdirSync(join(out, 'attributes'), { recursive: true });
 for (const [key, name] of [['str', 'strength'], ['agi', 'agility'], ['int', 'intelligence'], ['all', 'all']]) await picture(`panorama/images/primary_attribute_icons/primary_attribute_icon_${name}_psd.vtex`, join(out, 'attributes', `${key}.webp`), true);
+mkdirSync(join(out, 'gems'), { recursive: true });
+await picture('panorama/images/econ/sockets/gem_color_png.vtex', join(out, 'gems', 'gem.webp'), true);
+await picture('panorama/images/econ/sockets/gem_color_mask_png.vtex', join(out, 'gems', 'gem-mask.webp'), true);
 rmSync(temp, { recursive: true, force: true });
 console.log(`${made} pictures for ${heroes.length} heroes`);

@@ -4,99 +4,92 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Loadout — Dota 2 heroes in the browser</title>
-  <meta name="description" content="Every Dota 2 hero rendered live in the browser: the game's hero shader, animations and particle effects. Open source, MIT.">
-  <meta name="theme-color" content="#0c0b09">
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230c0b09'/%3E%3Cpath d='M11 7v18h11' fill='none' stroke='%23e9e2d2' stroke-width='3.4'/%3E%3C/svg%3E">
+  <meta name="description" content="Every Dota 2 hero rendered live in the browser, in any of the game's items: the game's hero shader, animations and particle effects. Open source, MIT.">
+  <meta name="theme-color" content="#08090a">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2308090a'/%3E%3Cpath d='M11 7v18h11' fill='none' stroke='%23e8e8ea' stroke-width='3.4'/%3E%3C/svg%3E">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Fira+Sans+Extra+Condensed:wght@300;500;700;800&family=Fira+Sans+Condensed:ital,wght@0,400;0,500;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="./style.css">
 </head>
-<body data-attr="agi">
+<body>
   <div class="app">
-    <aside class="roster" aria-label="Heroes">
-      <header class="mast">
-        <a class="logo" href="./" aria-label="Loadout">
-          <span class="logo-mark">Loadout</span>
-          <span class="logo-text">Dota 2<br>heroes</span>
-        </a>
-        <button class="lang" type="button" data-lang-toggle>EN</button>
-      </header>
-      <label class="search">
-        <input type="search" autocomplete="off" spellcheck="false" data-search>
-        <kbd>/</kbd>
-      </label>
-      <div class="attrs" role="group" data-attrs></div>
-      <nav class="list" data-list></nav>
-      <footer class="colophon">
-        <p data-t="colophon"></p>
-        <p class="meta"><a href="https://github.com/justkiddingxd/dota-loadout" data-repo>GitHub</a> · MIT · <span data-build></span></p>
-      </footer>
-    </aside>
-
-    <main class="stage">
-      <div class="backdrop" aria-hidden="true">
-        <div class="glow"></div>
-        <div class="floor"></div>
-        <div class="ghost" data-ghost></div>
-      </div>
+    <!-- The hero: a dark panel with its bars over him. -->
+    <main class="panel stage" data-stage>
       <canvas class="view" data-view></canvas>
-
-      <div class="top">
-        <div class="kicker">
-          <span class="dot"></span>
-          <span data-attr-name></span>
-          <span class="sep">/</span>
-          <span data-roles></span>
-        </div>
-        <div class="tools">
-          <button type="button" data-reset></button>
-          <button type="button" data-embed></button>
-        </div>
-      </div>
-
+      <header class="bar top">
+        <button class="btn" type="button" data-open-picker><span aria-hidden="true">←</span> <span data-t="heroes"></span></button>
+        <h1 class="title">Loadout</h1>
+        <div class="seg" role="tablist" data-mode></div>
+      </header>
       <div class="status" data-status>
-        <div class="bar"><i data-bar></i></div>
+        <div class="progress"><i data-bar></i></div>
         <span data-status-text></span>
       </div>
-      <p class="hint" data-hint></p>
-
-      <nav class="rail" aria-label="Items" data-rail hidden></nav>
-      <aside class="drawer" data-drawer hidden>
-        <header>
-          <h2 data-drawer-title></h2>
-          <button type="button" data-drawer-close aria-label="Close">×</button>
-        </header>
-        <label class="drawer-search"><input type="search" autocomplete="off" spellcheck="false" data-item-search></label>
-        <div class="drawer-body" data-drawer-body></div>
-        <footer class="styles" data-styles hidden></footer>
-        <footer class="gems" data-gems hidden></footer>
-        <footer class="styles unusual" data-unusual hidden></footer>
-      </aside>
-      <section class="plate">
-        <div class="ident">
-          <span class="num" data-num></span>
-          <h1 data-name></h1>
-          <span class="complexity" data-complexity></span>
+      <footer class="bar bottom">
+        <div class="group">
+          <button class="btn" type="button" data-save-frame></button>
+          <button class="btn" type="button" data-save-video></button>
         </div>
-        <p class="hype" data-hype></p>
-        <div class="anims">
-          <span class="anims-label" data-t="animations"></span>
-          <ul data-anims></ul>
+        <div class="group">
+          <button class="btn" type="button" data-pause></button>
         </div>
-      </section>
+        <div class="group">
+          <div class="menu" data-anim-menu>
+            <button class="btn" type="button" data-anim-button aria-haspopup="menu" aria-expanded="false"></button>
+            <ul class="menu-list" role="menu" data-anims hidden></ul>
+          </div>
+          <button class="btn" type="button" data-share></button>
+          <button class="btn" type="button" data-embed></button>
+        </div>
+      </footer>
+      <p class="toast" data-toast></p>
     </main>
+
+    <!-- What he can wear: the slots, and the cards of the open one. -->
+    <aside class="panel shelf" data-shelf>
+      <header class="shelf-head">
+        <div class="hero-line">
+          <button class="step" type="button" data-prev aria-label="Previous hero">‹</button>
+          <img class="hero-icon" data-hero-icon alt="">
+          <h2 data-hero-name></h2>
+          <button class="step" type="button" data-next aria-label="Next hero">›</button>
+        </div>
+        <nav class="head-tools">
+          <button class="btn" type="button" data-reset></button>
+          <a class="btn" href="https://github.com/justkiddingxd/dota-loadout">GitHub</a>
+          <button class="btn" type="button" data-lang-toggle>EN</button>
+        </nav>
+      </header>
+      <nav class="tabs" data-tabs aria-label="Slots"></nav>
+      <div class="filters">
+        <label class="search"><input type="search" autocomplete="off" spellcheck="false" data-item-search></label>
+        <div class="rarities" data-rarities></div>
+      </div>
+      <div class="shelf-body" data-shelf-body></div>
+    </aside>
   </div>
 
-  <dialog class="embed" data-embed-dialog>
+  <div class="picker" data-picker hidden role="dialog" aria-modal="true" aria-label="Heroes">
+    <div class="panel picker-inner">
+      <header class="picker-head">
+        <label class="search"><input type="search" autocomplete="off" spellcheck="false" data-search></label>
+        <div class="attrs" role="group" data-attrs></div>
+        <button class="btn close" type="button" data-close-picker aria-label="Close">×</button>
+      </header>
+      <div class="picker-body" data-list></div>
+    </div>
+  </div>
+
+  <dialog class="panel embed" data-embed-dialog>
     <form method="dialog">
       <header>
         <h2 data-t="embedTitle"></h2>
-        <button value="close" aria-label="Close">×</button>
+        <button class="btn" value="close" aria-label="Close">×</button>
       </header>
       <p data-t="embedText"></p>
       <pre><code data-embed-code></code></pre>
-      <div class="embed-actions"><button type="button" data-copy></button></div>
+      <div class="embed-actions"><button class="btn" type="button" data-copy></button></div>
       <p class="fine" data-t="embedFine"></p>
     </form>
   </dialog>

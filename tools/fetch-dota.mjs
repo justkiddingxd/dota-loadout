@@ -115,9 +115,9 @@ for (const item of Object.values(items)) {
   if (!defaultsOnly && item.image_inventory) roots.add(`panorama/images/${item.image_inventory.toLowerCase()}_png.vtex_c`);
 }
 assets(parseKV(text('scripts/npc/portraits_full_body_loadout.txt')).data.DOTAFullBodyLoadoutPortraitInfo, roots);
-// The site's pictures of the heroes: their portraits (wide, tall for the picker, small icons) and
-// the attributes' icons.
-for (const p of vpk.files.keys()) if (/^panorama\/images\/(heroes\/(selection\/|icons\/)?npc_dota_hero_[a-z_0-9]+_png|primary_attribute_icons\/[a-z_]+_psd)\.vtex_c$/.test(p)) roots.add(p);
+// The site's pictures of the heroes: their portraits (wide, tall for the picker, small icons), the
+// attributes' icons and the prismatic gem's.
+for (const p of vpk.files.keys()) if (/^panorama\/images\/(heroes\/(selection\/|icons\/)?npc_dota_hero_[a-z_0-9]+_png|primary_attribute_icons\/[a-z_]+_psd|econ\/sockets\/gem_color(_mask)?_png)\.vtex_c$/.test(p)) roots.add(p);
 log(`${count} items, ${roots.size} roots`);
 await take(roots);
 // What the game's archives lack and the engine's (game/core) have — the game mounts both: shared
