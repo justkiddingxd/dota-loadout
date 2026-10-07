@@ -222,11 +222,7 @@ const gemColour = (key) => (key === 'terrorblade_abysm' ? null : gemHex(key));
 const takesGem = (slot) => { const w = state.worn[slot], it = w && state.catalog?.items[w[0]]; return !!(it && !it.default && it.prismatic); };
 function setGem(slot, key) {
   if (key && takesGem(slot) && gemHex(key)) state.gems[slot] = key; else delete state.gems[slot];
-<<<<<<< HEAD
-  viewer.gem(slot, gemHex(state.gems[slot]) || null); writeHash(); renderWardrobe();
-=======
-  viewer.gem(slot, gemColour(state.gems[slot]) || null); writeHash(); if (state.drawer) renderDrawer();
->>>>>>> origin/main
+  viewer.gem(slot, gemColour(state.gems[slot]) || null); writeHash(); renderWardrobe();
 }
 const applyGems = () => { for (const slot of Object.keys(state.gems)) if (takesGem(slot) && applies(slot)) viewer.gem(slot, gemColour(state.gems[slot])); else delete state.gems[slot]; };
 // Unusual effects: those the item in a slot can roll (its catalog's unusual list), one at a time.
