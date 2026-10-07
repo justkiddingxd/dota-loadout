@@ -39,7 +39,7 @@ export function heroMaterial(m, texture, time, light, cube = null) {
     ...light, tMasks: { value: m.masks ? texture(m.masks) : BLACK }, tSpec: { value: m.specular ? texture(m.specular) : BLACK },
     tDetail: { value: m.detail ? texture(m.detail, true) : BLACK }, tFresnel: { value: m.fresnel ? texture(m.fresnel) : GREY }, uTime: time,
     uDetailScale: { value: new THREE.Vector2(...(m.detailScale?.length === 2 ? m.detailScale : [1, 1])) }, uDetailScroll: { value: new THREE.Vector2(...(m.detailScroll || [0, 0])) },
-    uDetailBlend: { value: m.detailMode ? m.detailBlend ?? 1 : 0 },
+    uDetailBlend: { value: m.detailMode ? m.detailBlend ?? 1 : 0 }, uDetailTint: { value: srgb(m.detailTint || [1, 1, 1]) },
     uRimColor: { value: srgb(m.rimColor?.length === 3 ? m.rimColor : [1, 1, 1]).multiplyScalar(m.rimScale ?? 0) }, uSpecColor: { value: srgb(m.specColor?.length === 3 ? m.specColor : [1, 1, 1]) },
     uSpecExponent: { value: m.specExponent ?? 16 }, uSpecScale: { value: m.specScale ?? 1 },
     tDiffuseWarp: { value: m.diffuseWarp ? texture(m.diffuseWarp) : BLACK }, uDiffuseWarp: { value: m.diffuseWarp ? 1 : 0 },
@@ -47,6 +47,14 @@ export function heroMaterial(m, texture, time, light, cube = null) {
   };
   const useCube = !!(m.cube && cube);
   material.userData.hero = uniforms;
+  // The hero's prismatic gem colours the detail (and the specular) of the materials that read it;
+  // without one they take their own colour back. hex: '#rrggbb' or null.
+  if (m.detailGem || m.specGem) material.userData.gem = (hex) => {
+    const c = hex ? new THREE.Color(hex) : null;
+    if (m.detailGem) uniforms.uDetailTint.value.copy(c || srgb(m.detailTint || [1, 1, 1]));
+    if (m.specGem) uniforms.uSpecColor.value.copy(c || srgb(m.specGem));
+  };
+  if (m.specGem) uniforms.uSpecColor.value.copy(srgb(m.specGem));
   material.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, uniforms);
     shader.fragmentShader = shader.fragmentShader
@@ -54,13 +62,13 @@ export function heroMaterial(m, texture, time, light, cube = null) {
 #define USE_PACKED_NORMALMAP
 uniform sampler2D tMasks, tSpec, tDetail, tFresnel, tDiffuseWarp; uniform float uTime, uDetailBlend, uSpecExponent, uSpecScale, uDiffuseWarp, uCubeScale; uniform vec2 uDetailScale, uDetailScroll;
 uniform mat3 uToSource;${useCube ? '\nuniform samplerCube tCube;' : ''}
-uniform vec3 uRimColor, uSpecColor, uLightDir, uLightColor, uAmbientDir, uAmbientColor, uAmbientTint, uShadowColor, uUp;`)
+uniform vec3 uRimColor, uSpecColor, uDetailTint, uLightDir, uLightColor, uAmbientDir, uAmbientColor, uAmbientTint, uShadowColor, uUp;`)
       .replace('#include <opaque_fragment>', `${m.color ? '' : 'vec2 vMapUv = vec2(0.0);'}
 vec4 heroMasks = texture2D(tMasks, vMapUv), heroSpec = texture2D(tSpec, vMapUv), heroDetailTex = texture2D(tDetail, vMapUv * uDetailScale + fract(uDetailScroll * uTime));
 vec3 heroBase = diffuseColor.rgb, heroV = normalize(vViewPosition), heroR = reflect(-heroV, normal);
 vec4 heroWarp = texture2D(tFresnel, vec2(clamp(dot(normal, heroV), 0.0, 1.0), 0.5));
 float heroDetail = heroMasks.r * uDetailBlend, heroNL = dot(normal, uLightDir), heroExponent = uSpecExponent * ${m.normal ? 'texture2D(normalMap, vNormalMapUv).b' : '1.0'};
-vec3 heroAlbedo = heroBase + heroDetailTex.rgb * heroDetail;
+vec3 heroAlbedo = heroBase + heroDetailTex.rgb * uDetailTint * heroDetail;
 float heroShadow = 1.0;
 #if NUM_DIR_LIGHT_SHADOWS > 0
 heroShadow = getShadow(directionalShadowMap[0], directionalLightShadows[0].shadowMapSize, directionalLightShadows[0].shadowIntensity, directionalLightShadows[0].shadowBias, directionalLightShadows[0].shadowRadius, vDirectionalShadowCoord[0]);

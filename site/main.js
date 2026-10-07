@@ -216,12 +216,19 @@ const valid = (worn) => Object.fromEntries(Object.entries(worn).filter(([slot, [
 
 // Prismatic gems: the palette (gems.json), and the gem in each slot's item while it takes one.
 const gemHex = (key) => state.palette.find((g) => g.key === key)?.hex || null;
+// Reflection's Shade is the gem Terrorblade's arcana comes with: the game draws it in the arcana's
+// own colours, not its listed one.
+const gemColour = (key) => (key === 'terrorblade_abysm' ? null : gemHex(key));
 const takesGem = (slot) => { const w = state.worn[slot], it = w && state.catalog?.items[w[0]]; return !!(it && !it.default && it.prismatic); };
 function setGem(slot, key) {
   if (key && takesGem(slot) && gemHex(key)) state.gems[slot] = key; else delete state.gems[slot];
+<<<<<<< HEAD
   viewer.gem(slot, gemHex(state.gems[slot]) || null); writeHash(); renderWardrobe();
+=======
+  viewer.gem(slot, gemColour(state.gems[slot]) || null); writeHash(); if (state.drawer) renderDrawer();
+>>>>>>> origin/main
 }
-const applyGems = () => { for (const slot of Object.keys(state.gems)) if (takesGem(slot) && applies(slot)) viewer.gem(slot, gemHex(state.gems[slot])); else delete state.gems[slot]; };
+const applyGems = () => { for (const slot of Object.keys(state.gems)) if (takesGem(slot) && applies(slot)) viewer.gem(slot, gemColour(state.gems[slot])); else delete state.gems[slot]; };
 // Unusual effects: those the item in a slot can roll (its catalog's unusual list), one at a time.
 const unusualsOf = (slot) => { const w = state.worn[slot], it = w && state.catalog?.items[w[0]]; return (it && !it.default && it.unusual) || []; };
 function setUnusual(slot, id) {
@@ -239,7 +246,7 @@ async function wear(slot, id, style = 0) {
   if (formOf(state.worn) !== state.form) return reload();
   writeHash(); renderWardrobe();
   await viewer.wear(slot, state.worn[slot] ? `items/${id}/` : null, style).catch((e) => console.error(e));
-  if (state.gems[slot]) viewer.gem(slot, gemHex(state.gems[slot]));
+  if (state.gems[slot]) viewer.gem(slot, gemColour(state.gems[slot]));
   if (state.unusual[slot]) viewer.unusual(slot, state.unusual[slot]);
 }
 // What the address asks for, on the slots it names; the others go back to their defaults.
@@ -370,7 +377,7 @@ window.addEventListener('hashchange', () => {
   const { id, worn, gems, unusual } = parseHash(); if (id !== state.current?.id) return open(id);
   dress(worn);
   // The gems it names, in the items it names (those still loading take theirs when they are on).
-  for (const slot of new Set([...Object.keys(state.gems), ...Object.keys(gems)])) { if (gems[slot] && state.worn[slot]) state.gems[slot] = gems[slot]; else delete state.gems[slot]; viewer.gem(slot, gemHex(state.gems[slot]) || null); }
+  for (const slot of new Set([...Object.keys(state.gems), ...Object.keys(gems)])) { if (gems[slot] && state.worn[slot]) state.gems[slot] = gems[slot]; else delete state.gems[slot]; viewer.gem(slot, gemColour(state.gems[slot]) || null); }
   for (const slot of new Set([...Object.keys(state.unusual), ...Object.keys(unusual)])) { if (unusual[slot] && state.worn[slot]) state.unusual[slot] = unusual[slot]; else delete state.unusual[slot]; viewer.unusual(slot, state.unusual[slot] ?? null); }
   writeHash(); renderWardrobe();
 });

@@ -31,11 +31,11 @@ export async function buildHero({ game, cli, hero, out, temp, log = () => {} }) 
   const has = (path) => existsSync(join(game, `${path}_c`));
   const run = async (args) => (await exec(cli, args, { encoding: 'utf8', maxBuffer: 1 << 30 })).stdout;
   const decompile = async (path, target) => { mkdirSync(dirname(target), { recursive: true }); await run(['-i', join(game, `${path}_c`), '--game', gameinfo, '-d', '-o', target]); };
-  // A hero's catalog of items (tools/build-items.mjs) outlives his rebuild.
-  const catalog = join(out, 'items.json'), kept = existsSync(catalog) ? readFileSync(catalog) : null;
+  // A hero's catalog of items (tools/build-items.mjs) and pictures (tools/build-portraits.mjs) outlive his rebuild.
+  const kept = ['items.json', 'card.webp', 'portrait.webp', 'icon.webp'].map((f) => [join(out, f), existsSync(join(out, f)) ? readFileSync(join(out, f)) : null]);
   rmSync(out, { recursive: true, force: true }); rmSync(temp, { recursive: true, force: true });
   for (const d of ['models', 'textures', 'fx']) mkdirSync(join(out, d), { recursive: true });
-  if (kept) writeFileSync(catalog, kept);
+  for (const [file, data] of kept) if (data) writeFileSync(file, data);
   mkdirSync(temp, { recursive: true });
 
   // ---------------------------------------------------------------- models and animations
@@ -287,6 +287,13 @@ export async function buildBundle({ game, cli, out, temp, log = () => {}, MODELS
         shared.set(cubeName, await webp(strip, join(out, 'textures', `${cubeName}.webp`), 92));
       }
     }
+    // Colours the hero's prismatic gem gives (Terrorblade's arcana and items): a DynamicParams
+    // expression «exists($GemColor) ? $GemColor : float3(r, g, b)» (or «$GemColor» alone) — the
+    // gem's colour, else the one given (the arcana's default gem, Reflection's Shade, is that).
+    const dynamic = text.split('"DynamicParams"')[1] || '';
+    const gemColour = (key) => { const e = new RegExp(`"${key}"\\s+"([^"]*)"`).exec(dynamic)?.[1]; if (!e?.includes('$GemColor')) return null; const f = /float3\(([-\d.]+),([-\d.]+),([-\d.]+)\)/.exec(e); return f ? [+f[1], +f[2], +f[3]] : [0.349, 0.735, 1]; };
+    const detailGem = gemColour('g_vDetail1ColorTint'), specGem = gemColour('g_vSpecularColor');
+    const detailTint = detailGem || vector(p.g_vDetail1ColorTint).slice(0, 3);
     const detailName = p.TextureDetail && !/default_detail/.test(p.TextureDetail) ? basename(p.TextureDetail).replace(/\.\w+$/, '') : null;
     if (detailName && !shared.has(detailName)) { const f = pick(detailName) || join(dir, basename(p.TextureDetail)); if (existsSync(f)) { const d = await image(f), dc = createCanvas(Math.min(d.width, 1024), Math.min(d.height, 1024)); dc.getContext('2d').drawImage(d, 0, 0, dc.width, dc.height); shared.set(detailName, await webp(dc, join(out, 'textures', `${detailName}.webp`))); } }
     materials[name] = {
@@ -296,6 +303,7 @@ export async function buildBundle({ game, cli, out, temp, log = () => {}, MODELS
       rimColor: vector(p.g_vRimLightColor).slice(0, 3), rimScale: +(p.g_flRimLightScale ?? 0), specColor: vector(p.g_vSpecularColor).slice(0, 3), specScale: +(crystal ? p.g_flSpecularIntensity ?? 1 : p.g_flSpecularScale ?? 1),
       diffuseWarp: diffuseName ? shared.get(diffuseName) || undefined : undefined,
       cube: cubeName ? shared.get(cubeName) || undefined : undefined, cubeScale: cubeName ? +(p.g_flCubeMapScalar ?? (p.g_flCubeMapScalarExterior !== undefined ? p.g_flCubeMapScalarExterior / 6 : 1)) : undefined, cubeByMetalness: p.F_MASK_CUBE_MAP_BY_METALNESS === '1' || undefined,
+      detailTint: detailTint.length === 3 && detailTint.some((v) => v !== 1) ? detailTint : undefined, detailGem: detailGem ? true : undefined, specGem: specGem || undefined,
       specExponent: +(p.g_flSpecularExponent ?? 16), alphaTest: p.F_ALPHA_TEST === '1' ? +(p.g_flAlphaTestReference ?? 0.5) : 0, translucent: p.F_TRANSLUCENT === '1' || crystal || undefined, additive: p.F_ADDITIVE_BLEND === '1' || undefined,
     };
   }

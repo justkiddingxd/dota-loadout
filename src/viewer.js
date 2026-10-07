@@ -436,7 +436,11 @@ async function buildHero(manifest, url, manager, time, light, textureScale = 1) 
   // Prismatic gems by slot: the game gives an item's effects the gem's colour (0–255) in control
   // point 15 and turns it on with CP 16 = (1, 1, 0); without a gem both are 0 (not CP 0 standing in).
   const gems = new Map(), GEMLESS = cpOf(new THREE.Matrix4());
-  const gemPoints = (owner) => { const g = gems.get(owner); if (!g) return [GEMLESS, GEMLESS];
+  // An arcana's gem (an item that is the hero's form: Terrorblade's) is the hero's: it colours all his
+  // effects and the materials that read $GemColor, whatever item they are on.
+  const heroGem = () => { for (const [slot, w] of worn) if (w.item && w.style?.form && gems.has(slot)) return gems.get(slot); return null; };
+  const gemTint = () => { const g = heroGem(), hex = g ? `#${((g.r << 16) | (g.g << 8) | g.b).toString(16).padStart(6, '0')}` : null; for (const m of materials.values()) m.userData.gem?.(hex); };
+  const gemPoints = (owner) => { const g = gems.get(owner) || heroGem(); if (!g) return [GEMLESS, GEMLESS];
     const color = cpOf(new THREE.Matrix4().makeTranslation(g.r, g.g, g.b)), on = cpOf(new THREE.Matrix4().makeTranslation(1, 1, 0)); return [color, on]; };
   const drive = (e, origin) => {
     const cps = e.sim.cps; cps.clear(); cps.set(0, cpOf(origin));
@@ -524,7 +528,7 @@ async function buildHero(manifest, url, manager, time, light, textureScale = 1) 
     // start again in the gem's colour.
     gem(slot, hex) {
       if (hex) { const c = parseInt(hex.replace('#', ''), 16); gems.set(slot, { r: (c >> 16) & 255, g: (c >> 8) & 255, b: c & 255 }); } else gems.delete(slot);
-      ambient();
+      ambient(); gemTint();
     },
     get gems() { return Object.fromEntries([...gems].map(([slot, g]) => [slot, `#${((g.r << 16) | (g.g << 8) | g.b).toString(16).padStart(6, '0')}`])); },
     // An unusual effect on a slot's item (an id of its manifest's unusual list, or null to take it off).
@@ -568,7 +572,7 @@ async function buildHero(manifest, url, manager, time, light, textureScale = 1) 
       putOn(record);
       worn.set(slot, { meshes: record.meshes, extra: record.extra, companion: record.companion, item: m ? m.id : null, style: s, styleIndex: m ? m.styles.indexOf(s) : 0, unusual: m?.unusual || null });
       attachments[slot] = m ? record.attachments : manifest.attachments?.[slot];
-      ambient(); remodify(); reskin();
+      ambient(); remodify(); reskin(); gemTint();
     },
     dispose() {
       mixer.stopAllAction(); for (const p of props) p.mixer.stopAllAction(); turntable.traverse((o) => { o.geometry?.dispose(); });
