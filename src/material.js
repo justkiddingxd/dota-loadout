@@ -3,7 +3,8 @@
 // alpha test here. Textures: masks R detail, G self-illumination, B rim; specular R specular,
 // G metalness, B tint by base colour; the normal's blue carries the specular exponent mask (its z
 // is rebuilt); the fresnel warp gives rim (R) and specular (B) strength by the angle to the eye.
-//   albedo      = colour + detail × detail mask × blend (the scrolling fire of F_DETAIL 2)
+//   detail      = detail × tint × detail mask × blend, as F_DETAIL says (None, Add, Add Self Illum, Mod2X):
+//   albedo      = colour + detail (Add), colour × mix(1, 2 × detail, detail mask × blend) (Mod2X), or colour
 //   diffuse     = half-Lambert key light (or the diffuse warp's ramp of it, where its mask says) × shadow
 //                 + directional ambient + shadow colour in shadow
 //   specular    = N·L × (L·R)^(exponent mask × exponent) × light × scale × specular mask
@@ -13,11 +14,18 @@
 //               + cube map (F_SPECULAR_CUBE_MAP) of the reflection × scale × specular mask (or metalness),
 //                 off a non-metal only at grazing angles (fresnel B), as Viper's wings and Marci's cloth look
 //                 × mix(1, colour, max(tint mask, metalness)) — a metal reflects in its own colour
-//   out         = mix(lit, albedo, self-illumination + detail alpha × detail mask × blend)
+//   out         = mix(lit, albedo, self-illumination) + detail (Add Self Illum: the scrolling fire of
+//                 Terrorblade's items, in his gem's colour over the colour's own, lit)
 import * as THREE from 'three';
 
 const BLACK = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1); BLACK.needsUpdate = true;
 const GREY = new THREE.DataTexture(new Uint8Array([128, 128, 255, 255]), 1, 1); GREY.needsUpdate = true;
+// F_DETAIL's blends of the detail into the albedo, and what the pixel then is (by mode; other shaders'
+// modes past Mod2X blend as Add with the detail's alpha as self-illumination, as before).
+const DETAIL_ALBEDO = ['vec3 heroAlbedo = heroBase;', 'vec3 heroAlbedo = heroBase + heroDetailColor * heroDetail;', 'vec3 heroAlbedo = heroBase;',
+  'vec3 heroAlbedo = heroBase * mix(vec3(1.0), 2.0 * heroDetailColor, clamp(heroDetail, 0.0, 1.0));'];
+const DETAIL_OUT = ['outgoingLight = mix(heroLit, heroAlbedo, heroMasks.g);', 'outgoingLight = mix(heroLit, heroAlbedo, heroMasks.g);',
+  'outgoingLight = mix(heroLit, heroAlbedo, heroMasks.g) + heroDetailColor * heroDetail;', 'outgoingLight = mix(heroLit, heroAlbedo, heroMasks.g);'];
 const srgb = (c) => new THREE.Color().setRGB(...c, THREE.SRGBColorSpace);
 
 // The game's axes from the scene's (glTF), for looking up the cube maps, which are in the game's.
@@ -68,7 +76,8 @@ vec4 heroMasks = texture2D(tMasks, vMapUv), heroSpec = texture2D(tSpec, vMapUv),
 vec3 heroBase = diffuseColor.rgb, heroV = normalize(vViewPosition), heroR = reflect(-heroV, normal);
 vec4 heroWarp = texture2D(tFresnel, vec2(clamp(dot(normal, heroV), 0.0, 1.0), 0.5));
 float heroDetail = heroMasks.r * uDetailBlend, heroNL = dot(normal, uLightDir), heroExponent = uSpecExponent * ${m.normal ? 'texture2D(normalMap, vNormalMapUv).b' : '1.0'};
-vec3 heroAlbedo = heroBase + heroDetailTex.rgb * uDetailTint * heroDetail;
+vec3 heroDetailColor = heroDetailTex.rgb * uDetailTint;
+${DETAIL_ALBEDO[m.detailMode] ?? 'vec3 heroAlbedo = heroBase + heroDetailColor * heroDetail;'}
 float heroShadow = 1.0;
 #if NUM_DIR_LIGHT_SHADOWS > 0
 heroShadow = getShadow(directionalShadowMap[0], directionalLightShadows[0].shadowMapSize, directionalLightShadows[0].shadowIntensity, directionalLightShadows[0].shadowBias, directionalLightShadows[0].shadowRadius, vDirectionalShadowCoord[0]);
@@ -79,7 +88,7 @@ vec3 heroDiffuse = heroRamp * heroShadow * uLightColor + clamp(dot(uAmbientDir, 
 vec3 heroSpecular = clamp(heroNL, 0.0, 1.0) * pow(max(dot(uLightDir, heroR), 0.001), heroExponent) * uLightColor * uSpecScale * heroSpec.r * mix(heroBase, uSpecColor, heroSpec.b) * max(heroWarp.b, heroSpec.g);
 vec3 heroLit = mix(heroAlbedo * heroDiffuse + heroSpecular, heroSpecular, heroSpec.g) + heroMasks.b * uRimColor * uAmbientTint * max(dot(normal, uUp), 0.0) * heroWarp.r;
 ${useCube ? `heroLit += textureCube(tCube, uToSource * inverseTransformDirection(heroR, viewMatrix)).rgb * uCubeScale * ${m.cubeByMetalness ? 'heroSpec.g' : 'heroSpec.r * mix(heroWarp.b, 1.0, heroSpec.g)'} * mix(vec3(1.0), heroBase, max(heroSpec.b, heroSpec.g));` : ''}
-outgoingLight = mix(heroLit, heroAlbedo, clamp(heroDetailTex.a * heroDetail + heroMasks.g, 0.0, 1.0));
+${DETAIL_OUT[m.detailMode] ?? 'outgoingLight = mix(heroLit, heroAlbedo, clamp(heroDetailTex.a * heroDetail + heroMasks.g, 0.0, 1.0));'}
 #include <opaque_fragment>`);
   };
   return material;

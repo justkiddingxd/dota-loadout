@@ -440,12 +440,14 @@ async function buildHero(manifest, url, manager, time, light, textureScale = 1) 
   // effects and the materials that read $GemColor, whatever item they are on.
   const heroGem = () => { for (const [slot, w] of worn) if (w.item && w.style?.form && gems.has(slot)) return gems.get(slot); return null; };
   const gemTint = () => { const g = heroGem(), hex = g ? `#${((g.r << 16) | (g.g << 8) | g.b).toString(16).padStart(6, '0')}` : null; for (const m of materials.values()) m.userData.gem?.(hex); };
-  const gemPoints = (owner) => { const g = gems.get(owner) || heroGem(); if (!g) return [GEMLESS, GEMLESS];
+  const gemPoints = (owner) => { const g = gems.get(owner) || heroGem(); if (!g) return null;
     const color = cpOf(new THREE.Matrix4().makeTranslation(g.r, g.g, g.b)), on = cpOf(new THREE.Matrix4().makeTranslation(1, 1, 0)); return [color, on]; };
+  // A gem's points over the effect's own: its drivers may set CPs 15 and 16 as it looks without one
+  // (Scythes of Sorrow's white, off), which the game's gem then overrides.
   const drive = (e, origin) => {
-    const cps = e.sim.cps; cps.clear(); cps.set(0, cpOf(origin));
-    const [color, on] = gemPoints(e.owner); cps.set(15, color); cps.set(16, on);
+    const cps = e.sim.cps; cps.clear(); cps.set(0, cpOf(origin)); cps.set(15, GEMLESS); cps.set(16, GEMLESS);
     for (const d of e.drivers) cps.set(d.cp, e.fixed.get(d.cp) || placeCP(d, e.owner, origin));
+    const gem = gemPoints(e.owner); if (gem) { cps.set(15, gem[0]); cps.set(16, gem[1]); }
   };
   // The ambient effects: the hero's own and his items' — a slot's default ones only while it wears
   // its default. Worn items may put their own effects and snapshots in place of the hero's.

@@ -1,9 +1,9 @@
 // Prismatic gems for the site: <out>/gems.json (the colours), and each hero's items.json marking the
-// items that take one (prismatic: true; default items take none). Runs after build-items.mjs; build-items marks them itself.
+// items that take one (prismatic: true, or the key of the gem it comes with; default items take none). Runs after build-items.mjs; build-items marks them itself.
 //   node tools/build-gems.mjs --game <…/dota> [--out assets]
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { prismaticColors, takesPrismatic } from './lib/gems.mjs';
+import { prismaticColors, SOCKETED, takesPrismatic } from './lib/gems.mjs';
 
 const args = process.argv.slice(2), opt = (name, fallback) => { const i = args.indexOf(`--${name}`); return i < 0 ? fallback : args[i + 1]; };
 const game = resolve(opt('game', '.cache/game/dota')), out = resolve(opt('out', 'assets'));
@@ -15,7 +15,7 @@ for (const hero of readdirSync(join(out, 'heroes'))) {
   const catalog = JSON.parse(readFileSync(file, 'utf8'));
   for (const [id, item] of Object.entries(catalog.items)) {
     const m = join(out, 'items', id, 'item.json'); if (!existsSync(m)) continue; total++;
-    const gem = item.default ? null : takesPrismatic(JSON.parse(readFileSync(m, 'utf8')));
+    const gem = item.default ? null : SOCKETED[id] || takesPrismatic(JSON.parse(readFileSync(m, 'utf8')));
     if (gem) { item.prismatic = gem; marked++; } else delete item.prismatic;
   }
   writeFileSync(file, JSON.stringify(catalog));
