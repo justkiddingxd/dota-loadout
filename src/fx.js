@@ -843,9 +843,9 @@ const OP = {
     return (ps, dt, s) => { const c = s.cp(cp), o = local ? off.clone().applyQuaternion(c.quat) : off; for (const p of ps) { p.pos.copy(c.pos).add(o); p.prev.copy(p.pos); } };
   },
   C_OP_RemapCPOrientationToRotations(d) {
-    // m_vecRotation turns about the x, y and z axes (Terrorblade's blade planes: z 90 lays them along
-    // the swords), not as pitch, yaw, roll.
-    const cp = d.m_TransformInput?.m_nControlPoint ?? d.m_nCP ?? 0, r = vec(d.m_vecRotation).multiplyScalar(Math.PI / 180), offset = new THREE.Quaternion().setFromEuler(new THREE.Euler(r.x, r.y, r.z, 'ZYX'));
+    // m_vecRotation is a QAngle in the point's frame: pitch, yaw, roll in degrees (Terrorblade's blade
+    // planes: roll 90 lays them along the swords, as the game's weapon icon shows them).
+    const cp = d.m_TransformInput?.m_nControlPoint ?? d.m_nCP ?? 0, offset = angles(vec(d.m_vecRotation));
     return (ps, dt, s) => { const q = s.cp(cp).quat.clone().multiply(offset), e = new THREE.Euler().setFromQuaternion(q, 'ZYX');
       for (const p of ps) { p.orient = q.clone(); p.rot.set(e.z, e.y, e.x); } };
   },
