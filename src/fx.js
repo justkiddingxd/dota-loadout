@@ -968,7 +968,18 @@ const OP = {
     return (ps, dt, s) => { if (s.endedAt === undefined) return; const k = time > 0 ? saturate((s.age - s.endedAt) / time) : 1; for (const p of ps) { p.capFrom ??= p.getS(out); p.setS(out, lerp(p.capFrom, to, k)); } };
   },
   // Lights, speed-to-CP links: nothing to draw.
-  C_OP_RemapSpeedtoCP: () => () => {},
+  // How fast a control point moves (here: its position's change over the step), remapped into a
+  // component of another (Terrorblade's feet flames take their rate from it: at a stand, the minimum).
+  C_OP_RemapSpeedtoCP(d) {
+    const cpIn = d.m_nInControlPointNumber ?? 0, cpOut = d.m_nOutControlPointNumber ?? -1, f = d.m_nField ?? 0, i0 = d.m_flInputMin ?? 0, i1 = d.m_flInputMax ?? 1, o0 = d.m_flOutputMin ?? 0, o1 = d.m_flOutputMax ?? 1, deltaV = d.m_bUseDeltaV;
+    let last = null, lastV = new THREE.Vector3();
+    return (ps, dt, s) => {
+      if (cpOut < 0 || f < 0 || f > 2 || dt <= 0) return;
+      const pos = s.cp(cpIn).pos, v = last ? pos.clone().sub(last).divideScalar(dt) : new THREE.Vector3(); last = pos.clone();
+      const speed = deltaV ? v.distanceTo(lastV) : v.length(); lastV = v;
+      const out = s.cp(cpOut).pos.clone(); out.setComponent(f, i0 === i1 ? (speed < i0 ? o0 : o1) : remapClamped(speed, i0, i1, o0, o1)); s.setCP(cpOut, out);
+    };
+  },
   C_OP_RemapSpeed: () => () => {},
   C_OP_SelectivelyEnableChildren: () => () => {},
   C_OP_RenderDeferredLight: () => () => {},
