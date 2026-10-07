@@ -216,15 +216,19 @@ const valid = (worn) => Object.fromEntries(Object.entries(worn).filter(([slot, [
 
 // Prismatic gems: the palette (gems.json), and the gem in each slot's item while it takes one.
 const gemHex = (key) => state.palette.find((g) => g.key === key)?.hex || null;
-// Reflection's Shade is the gem Terrorblade's arcana comes with: the game draws it in the arcana's
-// own colours, not its listed one.
-const gemColour = (key) => (key === 'terrorblade_abysm' ? null : gemHex(key));
 const takesGem = (slot) => { const w = state.worn[slot], it = w && state.catalog?.items[w[0]]; return !!(it && !it.default && it.prismatic); };
+// An item that comes with a gem (prismatic: its key; Terrorblade's arcana, Reflection's Shade) always
+// has one: that one unless another was put in. The address names only another.
+const socketed = (slot) => { const w = state.worn[slot], it = w && state.catalog?.items[w[0]]; return typeof it?.prismatic === 'string' ? it.prismatic : null; };
+const gemOf = (slot) => state.gems[slot] || socketed(slot);
 function setGem(slot, key) {
-  if (key && takesGem(slot) && gemHex(key)) state.gems[slot] = key; else delete state.gems[slot];
-  viewer.gem(slot, gemColour(state.gems[slot]) || null); writeHash(); renderWardrobe();
+  if (key && takesGem(slot) && gemHex(key) && key !== socketed(slot)) state.gems[slot] = key; else delete state.gems[slot];
+  viewer.gem(slot, gemHex(gemOf(slot))); writeHash(); renderWardrobe();
 }
-const applyGems = () => { for (const slot of Object.keys(state.gems)) if (takesGem(slot) && applies(slot)) viewer.gem(slot, gemColour(state.gems[slot])); else delete state.gems[slot]; };
+const applyGems = () => {
+  for (const slot of Object.keys(state.gems)) if (!takesGem(slot) || !applies(slot)) delete state.gems[slot];
+  for (const slot of Object.keys(state.worn)) if (takesGem(slot) && applies(slot) && gemOf(slot)) viewer.gem(slot, gemHex(gemOf(slot)));
+};
 // Unusual effects: those the item in a slot can roll (its catalog's unusual list), one at a time.
 const unusualsOf = (slot) => { const w = state.worn[slot], it = w && state.catalog?.items[w[0]]; return (it && !it.default && it.unusual) || []; };
 function setUnusual(slot, id) {
@@ -242,7 +246,7 @@ async function wear(slot, id, style = 0) {
   if (formOf(state.worn) !== state.form) return reload();
   writeHash(); renderWardrobe();
   await viewer.wear(slot, state.worn[slot] ? `items/${id}/` : null, style).catch((e) => console.error(e));
-  if (state.gems[slot]) viewer.gem(slot, gemColour(state.gems[slot]));
+  if (gemOf(slot)) viewer.gem(slot, gemHex(gemOf(slot)));
   if (state.unusual[slot]) viewer.unusual(slot, state.unusual[slot]);
 }
 // What the address asks for, on the slots it names; the others go back to their defaults.
@@ -270,7 +274,7 @@ function renderDock() {
     const b = el('button', { type: 'button', className: `dock-tile${w ? ' changed' : ''}`, title: it ? itemName(it) : slotName(s) },
       el('small', { textContent: slotName(s) }),
       el('span', { className: 'pic' }, icon ? el('img', { src: icon, alt: '' }) : null,
-        state.unusual[s.name] ? el('i', { className: 'mark unusual' }) : null, state.gems[s.name] ? el('i', { className: 'mark gem', style: `--g: ${gemHex(state.gems[s.name])}` }) : null));
+        state.unusual[s.name] ? el('i', { className: 'mark unusual' }) : null, gemOf(s.name) ? el('i', { className: 'mark gem', style: `--g: ${gemHex(gemOf(s.name))}` }) : null));
     if (it && !it.default) b.style.setProperty('--r', RARITY[it.rarity]);
     b.setAttribute('aria-expanded', state.open === s.name); b.onclick = () => openSheet(state.open === s.name ? null : s.name); return b;
   });
@@ -305,8 +309,8 @@ function renderSheet() {
   const rolls = unusualsOf(which);
   if (rolls.length) { const now = state.unusual[which] ?? null; parts.push(options(t().unusual, [[t().noUnusual, now === null, () => setUnusual(which, null)], ...rolls.map((u) => [u.name[lang] || u.name.en, u.id === now, () => setUnusual(which, u.id)])], 'unusual')); }
   if (takesGem(which) && state.palette.length) {
-    const now = state.gems[which] || null, none = el('button', { type: 'button', className: 'none', title: t().noGem }); none.setAttribute('aria-pressed', !now); none.onclick = () => setGem(which, null);
-    parts.push(el('div', { className: 'opt gems' }, el('span', { className: 'opt-label', textContent: t().gem }), el('div', { className: 'swatches' }, none, ...state.palette.map((g) => { const b = el('button', { type: 'button', title: g.name[lang] || g.name.en }); b.style.setProperty('--g', g.hex); b.setAttribute('aria-pressed', g.key === now); b.onclick = () => setGem(which, g.key); return b; }))));
+    const now = gemOf(which), none = el('button', { type: 'button', className: 'none', title: t().noGem }); none.setAttribute('aria-pressed', !now); none.onclick = () => setGem(which, null);
+    parts.push(el('div', { className: 'opt gems' }, el('span', { className: 'opt-label', textContent: t().gem }), el('div', { className: 'swatches' }, ...(socketed(which) ? [] : [none]), ...state.palette.map((g) => { const b = el('button', { type: 'button', title: g.name[lang] || g.name.en }); b.style.setProperty('--g', g.hex); b.setAttribute('aria-pressed', g.key === now); b.onclick = () => setGem(which, g.key); return b; }))));
   }
   opts.replaceChildren(...parts);
   const ids = slot.items.filter((id) => (!q || itemName(c.items[id]).toLowerCase().includes(q)) && (!state.rarity || c.items[id].rarity === state.rarity));
@@ -373,7 +377,7 @@ window.addEventListener('hashchange', () => {
   const { id, worn, gems, unusual } = parseHash(); if (id !== state.current?.id) return open(id);
   dress(worn);
   // The gems it names, in the items it names (those still loading take theirs when they are on).
-  for (const slot of new Set([...Object.keys(state.gems), ...Object.keys(gems)])) { if (gems[slot] && state.worn[slot]) state.gems[slot] = gems[slot]; else delete state.gems[slot]; viewer.gem(slot, gemColour(state.gems[slot]) || null); }
+  for (const slot of new Set([...Object.keys(state.gems), ...Object.keys(gems)])) { if (gems[slot] && state.worn[slot]) state.gems[slot] = gems[slot]; else delete state.gems[slot]; viewer.gem(slot, gemHex(gemOf(slot))); }
   for (const slot of new Set([...Object.keys(state.unusual), ...Object.keys(unusual)])) { if (unusual[slot] && state.worn[slot]) state.unusual[slot] = unusual[slot]; else delete state.unusual[slot]; viewer.unusual(slot, state.unusual[slot] ?? null); }
   writeHash(); renderWardrobe();
 });
