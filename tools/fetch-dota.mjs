@@ -48,6 +48,9 @@ const download = async (files) => {
 };
 
 const loose = ['game/dota/pak01_dir.vpk', 'game/dota/gameinfo.gi', 'game/dota/steam.inf'];
+// The directories anew each time: DepotDownloader keeps a file it has, and an old directory over
+// new archives reads past their end.
+for (const f of loose) rmSync(join(DL, f), { force: true });
 log('Directory…'); await download(loose);
 mkdirSync(OUT, { recursive: true });
 for (const f of loose.slice(1)) writeFileSync(join(OUT, f.replace('game/dota/', '')), readFileSync(join(DL, f)));
@@ -122,7 +125,7 @@ log(`${count} items, ${roots.size} roots`);
 await take(roots);
 // What the game's archives lack and the engine's (game/core) have — the game mounts both: shared
 // particle textures (light_glow_01 of 362 items' glows). Taken with what they reference there.
-await download(['game/core/pak01_dir.vpk']);
+rmSync(join(DL, 'game/core/pak01_dir.vpk'), { force: true }); await download(['game/core/pak01_dir.vpk']);
 const core = new Vpk(join(DL, 'game/core/pak01_dir.vpk')), corePath = (a) => join(DL, 'game/core', `pak01_${String(a).padStart(3, '0')}.vpk`);
 const fromCore = new Set([...missing].map((p) => (core.has(p) ? p : `${p}_c`)).filter((p) => core.has(p)));
 const coreArchives = [...new Set([...fromCore].map((p) => core.archiveOf(p)).filter((a) => a !== null))];
