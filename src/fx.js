@@ -354,9 +354,14 @@ const INIT = {
   },
   // Skinned snapshots follow the hero's bones; rigid ones (no bone weights, e.g. the Desolation
   // blades) hold points in the space of the snapshot's control point, which here is the arm.
+  // A snapshot's other attributes (its points' colours, radii, normals) go to the particle born on
+  // that point: Bane's Origin of the Unmaking's tentacles are dark blue in theirs, not white.
   C_INIT_InitFromCPSnapshot(d) {
-    const cp = d.m_nControlPointNumber ?? 0, random = d.m_bRandom, attr = field(d.m_nAttributeToRead, F.Position);
-    return (p, s) => { const snap = s.snapshot(cp); if (!snap || attr !== F.Position) return; const i = random ? Math.floor(rnd() * snap.count) : p.uid % snap.count; p.snap = i; p.snapFrom = snap;
+    const cp = d.m_nControlPointNumber ?? 0, random = d.m_bRandom, attr = field(d.m_nAttributeToRead, F.Position), out = field(d.m_nAttributeToWrite, attr);
+    const key = { [F.Color]: 'color', [F.Radius]: 'radius', [F.Normal]: 'normal', [F.Alpha]: 'alpha' }[attr];
+    return (p, s) => { const snap = s.snapshot(cp); if (!snap) return;
+      if (attr !== F.Position) { const values = key && snap.data[key]; if (!values?.length) return; const v = values[p.snap >= 0 ? p.snap % values.length : p.uid % values.length];
+        if (Array.isArray(v)) p.setV(out, new THREE.Vector3(...v)); else p.setS(out, v); return; } const i = random ? Math.floor(rnd() * snap.count) : p.uid % snap.count; p.snap = i; p.snapFrom = snap;
       p.pos.copy(snap.point(i, s.cp(cp).matrix())); p.prev.copy(p.pos); if (snap.data.bone && s.model) p.bone = s.model.bone(snap.boneName()); };
   },
   C_INIT_CreateOnModel(d) {
@@ -952,6 +957,12 @@ const OP = {
   C_OP_SetChildControlPoints(d) {
     const group = d.m_nChildGroupID ?? 0, first = d.m_nFirstControlPoint ?? 0, count = d.m_nNumControlPoints ?? 1, src = d.m_nFirstSourcePoint ?? 0, orient = d.m_bSetOrientation;
     return (ps, dt, s) => { const kids = s.sim.children.filter((c) => c.groupId === group); for (const k of kids) for (let i = 0; i < count; i++) { const p = ps[src + i]; if (p) k.state.override(first + i, p.pos, orient ? forwardBasis(p.normal) : null); } };
+  },
+  // The system's own control points on its particles (each child takes them as its own): Bane's
+  // Slumbering Terror puts its orbs' CP 3 on each arm's streak.
+  C_OP_SetControlPointsToParticle(d) {
+    const first = d.m_nFirstControlPoint ?? 1, count = d.m_nNumControlPoints ?? 1, src = d.m_nFirstSourcePoint ?? 0, orient = d.m_bSetOrientation;
+    return (ps, dt, s) => { for (let i = 0; i < count; i++) { const p = ps[src + i]; if (!p) continue; s.setCP(first + i, p.pos); if (orient) s.setCPRotation(first + i, forwardBasis(p.normal)); } };
   },
   C_OP_RotateVector(d) {
     const out = field(d.m_nFieldOutput, F.Normal), a0 = vec(d.m_vecRotAxisMin, [0, 0, 1]), a1 = vec(d.m_vecRotAxisMax, [0, 0, 1]), r0 = d.m_flRotRateMin ?? 180, r1 = d.m_flRotRateMax ?? 180, normalize = d.m_bNormalize;
