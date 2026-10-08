@@ -305,6 +305,8 @@ export async function buildBundle({ game, cli, out, temp, log = () => {}, MODELS
       cube: cubeName ? shared.get(cubeName) || undefined : undefined, cubeScale: cubeName ? +(p.g_flCubeMapScalar ?? (p.g_flCubeMapScalarExterior !== undefined ? p.g_flCubeMapScalarExterior / 6 : 1)) : undefined, cubeByMetalness: p.F_MASK_CUBE_MAP_BY_METALNESS === '1' || undefined,
       detailTint: detailTint.length === 3 && detailTint.some((v) => v !== 1) ? detailTint : undefined, detailGem: detailGem ? true : undefined, specGem: specGem || undefined,
       specExponent: +(p.g_flSpecularExponent ?? 16), alphaTest: p.F_ALPHA_TEST === '1' ? +(p.g_flAlphaTestReference ?? 0.5) : 0, translucent: p.F_TRANSLUCENT === '1' || crystal || undefined, additive: p.F_ADDITIVE_BLEND === '1' || undefined,
+      // F_ENABLE_CLOAK: how much of it is see-through (Io's body: all, only his glow shows).
+      cloak: p.F_ENABLE_CLOAK === '1' && +(p.g_flMaterialCloakFactor ?? 0) > 0 ? +p.g_flMaterialCloakFactor : undefined,
     };
   }
 

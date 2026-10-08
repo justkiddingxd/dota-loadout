@@ -38,6 +38,10 @@ export function heroMaterial(m, texture, time, light, cube = null) {
     map: m.color ? texture(m.color, true) : null, normalMap: m.normal ? texture(m.normal) : null,
     alphaTest: m.alphaTest || 0, transparent: !!(m.translucent || m.additive), depthWrite: !(m.translucent || m.additive), side: THREE.DoubleSide,
   });
+  // F_ENABLE_CLOAK: a cloaked body is not drawn (the game only bends what is behind it), a partly
+  // cloaked one fades by its factor.
+  if (m.cloak >= 1) material.visible = false;
+  else if (m.cloak > 0) Object.assign(material, { transparent: true, opacity: 1 - m.cloak, depthWrite: false });
   // F_ADDITIVE_BLEND: glow layers (weapons, wings, Visage's spectral body) add to what lies behind.
   // The canvas is see-through (the page shows behind it): adding light must not add alpha too, or
   // a glow's dark edges turn the page behind them into the scene's black (Terrorblade's sword planes
