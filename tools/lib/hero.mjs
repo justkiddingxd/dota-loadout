@@ -393,7 +393,8 @@ export async function buildBundle({ game, cli, out, temp, log = () => {}, MODELS
 
   // Attachments of every model (bone, offset in inches and rotation in the bone's space).
   const attachments = {};
-  for (const name of Object.keys(modelFiles).filter((k) => kind(k) !== 'prop')) {
+  // Props' too (a courier's: its effects ride on them).
+  for (const name of Object.keys(modelFiles)) {
     const text = await run(['-i', join(game, `${MODELS[name]}_c`), '-a']), list = {};
     for (const m of text.matchAll(/m_attachments =\s*\[/g)) {
       let depth = 0, end = m.index + m[0].length - 1;

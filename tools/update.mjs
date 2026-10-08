@@ -25,7 +25,7 @@ if (!flag('no-fetch')) run('fetch-dota.mjs');
 // The game's heroes and the items for them that the site shows (wearables and defaults).
 const ig = parseKV(readFileSync(join(GAME, 'scripts/items/items_game.txt'), 'utf8')).data.items_game;
 const heroesOf = (item) => Object.keys(item.used_by_heroes || {}).filter((k) => k.startsWith('npc_dota_hero_')).map((k) => k.slice(14));
-const items = Object.entries(ig.items).filter(([, i]) => (['wearable', 'default_item', 'taunt'].includes(i.prefab) && i.used_by_heroes && typeof i.used_by_heroes === 'object') || i.prefab === 'emblem');
+const items = Object.entries(ig.items).filter(([, i]) => (['wearable', 'default_item', 'taunt'].includes(i.prefab) && i.used_by_heroes && typeof i.used_by_heroes === 'object') || ['emblem', 'courier', 'ward'].includes(i.prefab));
 const built = JSON.parse(readFileSync(join(ASSETS, 'heroes/index.json'), 'utf8')).heroes.map((h) => h.id);
 const npc = parseKV(readFileSync(join(GAME, 'scripts/npc/npc_heroes.txt'), 'utf8')).data.DOTAHeroes;
 const gameHeroes = Object.entries(npc).filter(([k, h]) => k.startsWith('npc_dota_hero_') && h && typeof h === 'object' && h.Enabled !== '0' && k !== 'npc_dota_hero_base').map(([k]) => k.slice(14));
@@ -55,6 +55,9 @@ const heroes = fresh.some(([, i]) => i.prefab === 'emblem') ? [...new Set([...bu
 const screens = heroScreens(ig).map((s) => s.id), newScreens = screens.filter((id) => !(state?.screens || []).includes(id));
 if (heroes.length) run('build-items.mjs', '--game', GAME, '--cli', CLI, '--only', heroes.join(','), '--keep', '--items', fresh.map(([id]) => id).join(','));
 if (newScreens.length || newHeroes.length) run('build-screens.mjs', '--game', GAME, '--cli', CLI);
-if ((heroes.length || newScreens.length) && !flag('no-deploy') && !flag('dry')) { log('→ deploy'); execFileSync('sh', [join(ROOT, 'tools/deploy.sh')], { cwd: ROOT, stdio: 'inherit' }); }
+// Couriers and wards are any hero's: those new or changed, and their list.
+const pets = fresh.filter(([, i]) => i.prefab === 'courier' || i.prefab === 'ward').map(([id]) => id);
+if (pets.length) run('build-couriers.mjs', '--game', GAME, '--cli', CLI, '--keep', '--items', pets.join(','));
+if ((heroes.length || newScreens.length || pets.length) && !flag('no-deploy') && !flag('dry')) { log('→ deploy'); execFileSync('sh', [join(ROOT, 'tools/deploy.sh')], { cwd: ROOT, stdio: 'inherit' }); }
 if (!flag('dry')) writeFileSync(STATE, JSON.stringify({ updated: new Date().toISOString(), items: items.map(([id]) => id), signs, screens }));
 log(heroes.length || newScreens.length ? `done: ${heroes.length} heroes, ${newScreens.length} loading screens` : 'nothing new');

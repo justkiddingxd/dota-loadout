@@ -270,6 +270,9 @@ function unusualEffects(game, ig, text) {
   };
 }
 
+// Where a courier and a ward stand beside the hero (game units: forward, left, up).
+const COURIER_AT = [10, 115, 0], WARD_AT = [10, -105, 0];
+
 export function loadCosmetics(game) {
   // The hero an item is for, short (a pet's loadout places are by it).
   const heroOf = (item) => Object.keys(item.used_by_heroes || {})[0]?.replace(/^npc_dota_hero_/, '');
@@ -284,11 +287,11 @@ export function loadCosmetics(game) {
   const setOf = new Map();
   for (const [key, set] of Object.entries(ig.item_sets || {})) for (const name of Object.keys(set.items || {})) if (byName.has(name)) setOf.set(byName.get(name), key);
   const unusualOf = unusualEffects(game, ig, text);
-  const heroes = new Map(), emblems = [];
+  const heroes = new Map(), emblems = [], couriers = [], wards = [];
   for (const [id, item] of Object.entries(ig.items)) {
     // Taunts too: an item of the taunt slot whose activity modifier picks the hero's taunt animation.
-    const emblem = item.prefab === 'emblem';
-    if (!emblem && (!(item.prefab === 'default_item' || item.prefab === 'wearable' || item.prefab === 'taunt') || !item.used_by_heroes || typeof item.used_by_heroes !== 'object')) continue;
+    const emblem = item.prefab === 'emblem', unit = item.prefab === 'courier' || item.prefab === 'ward';
+    if (!emblem && !unit && (!(item.prefab === 'default_item' || item.prefab === 'wearable' || item.prefab === 'taunt') || !item.used_by_heroes || typeof item.used_by_heroes !== 'object')) continue;
     const visuals = item.visuals || {}, modifiers = Object.entries(visuals).filter(([k, m]) => /^asset_modifier/.test(k) && m && typeof m === 'object').map(([, m]) => m);
     const styleKeys = visuals.styles ? Object.keys(visuals.styles).sort((a, b) => a - b) : [null], persona = modifiers.find((m) => m.type === 'persona')?.persona;
     const styles = styleKeys.map((s) => {
@@ -328,6 +331,24 @@ export function loadCosmetics(game) {
       if (fx) emblems.push({ id: +id, name: text(item.item_name) || { en: item.name, ru: item.name }, slot: 'emblem', rarity: item.item_rarity || 'common', default: false, set: null, styles: [{ ...styles[0], effects: [fx] }] });
       continue;
     }
+    // A courier or a ward stands beside the hero, as a pet: the courier on the ground (the Radiant's
+    // model) and, as a style of its own, flying; the ward as the observer ward.
+    if (unit) {
+      const ward = item.prefab === 'ward', out = [];
+      styleKeys.forEach((k, i) => {
+        const mine = modifiers.filter((m) => m.style === undefined || m.style === (k ?? '0'));
+        const modelOf = (type, asset) => mine.find((m) => m.type === type && m.asset === asset && /\.vmdl$/.test(m.modifier || ''))?.modifier;
+        const scale = +(mine.find((m) => m.type === 'entity_scale' && (!m.asset || /courier|ward/.test(m.asset)))?.scale_size ?? 1) || 1;
+        const base = { ...styles[i], models: [], refits: {}, skin: +(styles[i].skin || visuals.skin || 0) }, at = (model) => (model ? { model, scale, offset: ward ? WARD_AT : COURIER_AT } : null);
+        if (ward) { out.push({ ...base, companion: at(modelOf('entity_model', 'npc_dota_observer_wards')) }); return; }
+        const flying = modelOf('courier_flying', 'radiant'), name = (lang, word) => (base.name?.[lang] ? `${base.name[lang]} · ${word}` : word);
+        out.push({ ...base, name: base.name || (flying ? { en: 'Ground', ru: 'На земле' } : null), companion: at(modelOf('courier', 'radiant')) });
+        if (flying) out.push({ ...base, name: { en: name('en', 'Flying'), ru: name('ru', 'В полёте') }, companion: at(flying) });
+      });
+      const list = out.filter((x) => x.companion); if (!list.length) continue;
+      (ward ? wards : couriers).push({ id: +id, name: text(item.item_name) || { en: item.name, ru: item.name }, slot: item.prefab, rarity: item.item_rarity || 'common', default: !!+(item.baseitem || 0), set: null, styles: list });
+      continue;
+    }
     const unsupported = [...new Set(modifiers.map((m) => m.type).filter((t) => UNSUPPORTED.has(t)))], unusual = unusualOf(item);
     for (const npc of Object.keys(item.used_by_heroes)) {
       const h = heroes.get(npc) || heroes.set(npc, { items: [] }).get(npc);
@@ -344,6 +365,7 @@ export function loadCosmetics(game) {
       .filter((s) => s.items.length > 1 && h.items.some((i) => i.set === s.key));
   }
   // Emblems, any hero's (heroes.emblems), and their slot's name.
+  heroes.couriers = couriers; heroes.wards = wards;
   heroes.emblems = emblems; heroes.emblemSlot = { name: 'emblem', text: text('#LoadoutSlot_Emblem') || text('#DOTA_WearableType_Emblem') || { en: 'Emblem', ru: 'Эмблема' } };
   return heroes;
 }

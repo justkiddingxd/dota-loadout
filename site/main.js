@@ -5,7 +5,7 @@ const T = {
     heroes: 'Герои', items: 'Предметы', sets: 'Сеты', backdrops: 'Фон', backdrop: 'Фон', noBackdrop: 'Без фона', findBackdrop: 'Найти фон', all: 'Все', search: 'Найти героя', findItem: 'Найти предмет', findSet: 'Найти сет', allRarities: 'Все',
     attrs: { str: 'Сила', agi: 'Ловкость', int: 'Интеллект', all: 'Универсал' }, short: { str: 'STR', agi: 'AGI', int: 'INT', all: 'UNI' },
     saveFrame: 'Кадр', saveVideo: 'Видео', stop: 'Стоп', pause: 'Пауза', play: 'Пуск', recenter: 'Вид', share: 'Ссылка', shared: 'Ссылка скопирована', embed: 'Встроить', copy: 'Копировать', copied: 'Скопировано',
-    saved: 'Сохранено', noVideo: 'Браузер не умеет записывать видео', reset: 'Сбросить', worn: 'Надето', defaultItem: 'Стандарт', styles: 'стил.', style: 'Стиль', unusual: 'Необычный эффект', noUnusual: 'Нет', kinetic: 'Кинетический самоцвет', kineticTip: 'меняет анимации', effigy: 'Статуя', effigyTip: 'выберите анимацию и поставьте на паузу — это поза', noEffigy: 'Герой', stuffs: { gold: 'Золото', frost: 'Лёд', jade: 'Нефрит', stone: 'Камень' }, freeze: 'Застыть', unfreeze: 'Ожить', screens: 'Загрузочные экраны героя', screen: 'Загрузочный экран', scenes: 'Сцены', abilityFx: 'Эффекты способностей', abilityTip: 'нажмите — герой покажет', otherFx: 'Другое', playTaunt: 'Показать насмешку',
+    saved: 'Сохранено', noVideo: 'Браузер не умеет записывать видео', reset: 'Сбросить', worn: 'Надето', defaultItem: 'Стандарт', styles: 'стил.', style: 'Стиль', unusual: 'Необычный эффект', noUnusual: 'Нет', kinetic: 'Кинетический самоцвет', kineticTip: 'меняет анимации', couriers: 'Курьер', noPet: 'Нет', courier: 'Курьер', ward: 'Вард', findCourier: 'Найти курьера или вард', effigy: 'Статуя', effigyTip: 'выберите анимацию и поставьте на паузу — это поза', noEffigy: 'Герой', stuffs: { gold: 'Золото', frost: 'Лёд', jade: 'Нефрит', stone: 'Камень' }, freeze: 'Застыть', unfreeze: 'Ожить', screens: 'Загрузочные экраны героя', screen: 'Загрузочный экран', scenes: 'Сцены', abilityFx: 'Эффекты способностей', abilityTip: 'нажмите — герой покажет', otherFx: 'Другое', playTaunt: 'Показать насмешку',
     gem: 'Призматический самоцвет', gemCard: 'Самоцвет', gemTab: 'Самоцвет', noGem: 'Без самоцвета', itemsN: 'предм.', noItems: 'Ничего не нашлось', nothing: 'Никого не нашлось',
     loading: 'Загрузка', failed: 'Не удалось загрузить героя', animation: 'Анимация',
     embedTitle: 'Встроить героя', embedText: 'Герой в этом же наряде на любой странице: элемент <dota-hero> из пакета dota-loadout (npm i dota-loadout three). Модели грузятся с этого сайта.',
@@ -17,7 +17,7 @@ const T = {
     heroes: 'Heroes', items: 'Items', sets: 'Sets', backdrops: 'Backdrop', backdrop: 'Backdrop', noBackdrop: 'None', findBackdrop: 'Find a backdrop', all: 'All', search: 'Find a hero', findItem: 'Find an item', findSet: 'Find a set', allRarities: 'All',
     attrs: { str: 'Strength', agi: 'Agility', int: 'Intelligence', all: 'Universal' }, short: { str: 'STR', agi: 'AGI', int: 'INT', all: 'UNI' },
     saveFrame: 'Save frame', saveVideo: 'Save video', stop: 'Stop', pause: 'Pause', play: 'Play', recenter: 'Recenter', share: 'Link', shared: 'Link copied', embed: 'Embed', copy: 'Copy', copied: 'Copied',
-    saved: 'Saved', noVideo: 'This browser cannot record video', reset: 'Reset', worn: 'Worn', defaultItem: 'Default', styles: 'styles', style: 'Style', unusual: 'Unusual effect', noUnusual: 'None', kinetic: 'Kinetic gem', kineticTip: 'changes animations', effigy: 'Effigy', effigyTip: 'pick an animation and pause: that is the pose', noEffigy: 'The hero', stuffs: { gold: 'Gold', frost: 'Frost', jade: 'Jade', stone: 'Stone' }, freeze: 'Freeze', unfreeze: 'Unfreeze', screens: "The hero's loading screens", screen: 'Loading screen', scenes: 'Scenes', abilityFx: 'Ability effects', abilityTip: 'click: the hero shows it', otherFx: 'Other', playTaunt: 'Play the taunt',
+    saved: 'Saved', noVideo: 'This browser cannot record video', reset: 'Reset', worn: 'Worn', defaultItem: 'Default', styles: 'styles', style: 'Style', unusual: 'Unusual effect', noUnusual: 'None', kinetic: 'Kinetic gem', kineticTip: 'changes animations', couriers: 'Courier', noPet: 'None', courier: 'Courier', ward: 'Ward', findCourier: 'Find a courier or ward', effigy: 'Effigy', effigyTip: 'pick an animation and pause: that is the pose', noEffigy: 'The hero', stuffs: { gold: 'Gold', frost: 'Frost', jade: 'Jade', stone: 'Stone' }, freeze: 'Freeze', unfreeze: 'Unfreeze', screens: "The hero's loading screens", screen: 'Loading screen', scenes: 'Scenes', abilityFx: 'Ability effects', abilityTip: 'click: the hero shows it', otherFx: 'Other', playTaunt: 'Play the taunt',
     gem: 'Prismatic gem', gemCard: 'Prismatic gem', gemTab: 'Gem', noGem: 'No gem', itemsN: 'items', noItems: 'Nothing found', nothing: 'Nobody by that name',
     loading: 'Loading', failed: 'Could not load the hero', animation: 'Animation',
     embedTitle: 'Embed a hero', embedText: 'The hero in this outfit on any page: the <dota-hero> element of the dota-loadout package (npm i dota-loadout three). Models load from this site.',
@@ -34,7 +34,7 @@ let lang = stored || (/^(ru|uk|be|kk)/i.test(navigator.language) ? 'ru' : 'en');
 const t = () => T[lang];
 
 // mode: the shelf's items or sets; tab: its slot ('#all' for every slot); rarity, itemQuery: its filters.
-const state = { gems: {}, unusual: {}, kinetic: {}, kinetics: [], palette: [], index: null, heroes: [], current: null, filter: new Set(), query: '', active: null, catalog: null, worn: {}, mode: 'items', tab: '#all', rarity: null, itemQuery: '' };
+const state = { gems: {}, unusual: {}, kinetic: {}, kinetics: [], palette: [], index: null, heroes: [], current: null, filter: new Set(), query: '', active: null, catalog: null, worn: {}, pets: { courier: null, ward: null }, couriers: null, mode: 'items', tab: '#all', rarity: null, itemQuery: '' };
 
 // ---------------------------------------------------------------- viewer
 const canvas = $('[data-view]');
@@ -56,7 +56,7 @@ function applyTexts() {
   $('[data-save-frame]').textContent = t().saveFrame; $('[data-reset]').textContent = t().recenter;
   renderPause(); renderRecord();
   for (const n of document.querySelectorAll('[data-t]')) n.textContent = t()[n.dataset.t];
-  $('[data-mode]').replaceChildren(...['items', 'sets', 'backdrops', 'effigy'].map((m) => { const b = el('button', { type: 'button', role: 'tab', textContent: t()[m] }); b.dataset.mode = m; b.onclick = () => setMode(m); return b; }));
+  $('[data-mode]').replaceChildren(...['items', 'sets', 'couriers', 'backdrops', 'effigy'].map((m) => { const b = el('button', { type: 'button', role: 'tab', textContent: t()[m] }); b.dataset.mode = m; b.onclick = () => setMode(m); return b; }));
   $('[data-attrs]').replaceChildren(...ATTRS.map((a) => {
     const b = el('button', { type: 'button', title: t().attrs[a] }, el('img', { src: `attributes/${a}.webp`, alt: '' }), t().short[a]);
     b.setAttribute('aria-pressed', state.filter.has(a)); b.onclick = () => { state.filter.has(a) ? state.filter.delete(a) : state.filter.add(a); applyTexts(); }; return b;
@@ -153,7 +153,7 @@ async function open(id) {
     // His loading screens, as backdrops.
     fetch(`heroes/${h.id}/screens.json`).then((r) => (r.ok ? r.json() : { screens: [] })).catch(() => ({ screens: [] })).then((d) => { if (state.current === h) { backdrop.screens = d.screens || []; if (state.mode === 'backdrops') renderShelf(); } });
     if (ticket !== loads) return;
-    const asked = parseHash(); state.worn = valid(asked.worn);
+    const asked = parseHash(); state.worn = valid(asked.worn); takePets(asked.worn);
     state.gems = Object.fromEntries(Object.entries(asked.gems).map(([slot, g]) => [slotNow(asked.worn, slot), g]).filter(([slot]) => state.worn[slot]));
     state.unusual = Object.fromEntries(Object.entries(asked.unusual).map(([slot, u]) => [slotNow(asked.worn, slot), u]).filter(([slot]) => state.worn[slot]));
     state.kinetic = Object.fromEntries(Object.entries(asked.kinetic).map(([slot, k]) => [slotNow(asked.worn, slot), k]).filter(([slot]) => state.worn[slot]));
@@ -180,7 +180,7 @@ async function reload(ticket = ++loads) {
   $('[data-status]').hidden = true;
   state.animations = loaded.animations; state.kinetics = loaded.kinetic || []; renderHero(h); mark(idleOf(h));
   writeHash(); renderShelf();
-  await Promise.all(Object.entries(state.worn).filter(([slot, w]) => w && applies(slot)).map(([slot, [id, style]]) => viewer.wear(slot, `items/${id}/`, style).catch((e) => console.error(e))));
+  await Promise.all([...Object.entries(state.worn).filter(([slot, w]) => w && applies(slot)), ...Object.entries(state.pets).filter(([, w]) => w)].map(([slot, [id, style]]) => viewer.wear(slot, `items/${id}/`, style).catch((e) => console.error(e))));
   applyGems(); applyUnusual(); applyKinetic();
 }
 
@@ -193,7 +193,7 @@ function parseHash() {
   return { id, worn, gems, unusual, kinetic };
 }
 function writeHash() {
-  const parts = Object.entries(state.worn).filter(([, w]) => w).map(([slot, [id, style]]) => `${slot}=${id}${style ? `.${style}` : ''}${state.gems[slot] ? `~${state.gems[slot]}` : ''}${state.unusual[slot] ? `!${state.unusual[slot]}` : ''}${state.kinetic[slot] != null ? `^${state.kinetic[slot]}` : ''}`);
+  const parts = Object.entries({ ...state.worn, ...state.pets }).filter(([, w]) => w).map(([slot, [id, style]]) => `${slot}=${id}${style ? `.${style}` : ''}${state.gems[slot] ? `~${state.gems[slot]}` : ''}${state.unusual[slot] ? `!${state.unusual[slot]}` : ''}${state.kinetic[slot] != null ? `^${state.kinetic[slot]}` : ''}`);
   history.replaceState(null, '', `#${state.current.id}${parts.length ? `/${parts.join(',')}` : ''}`);
 }
 const RARITY = { common: '#b0c3d9', uncommon: '#5e98d9', rare: '#4b69ff', mythical: '#8847ff', legendary: '#d32ce6', immortal: '#e4ae39', arcana: '#ade55c', ancient: '#eb4b4b', seasonal: '#fff34f' };
@@ -338,9 +338,10 @@ function setTab(tab) { state.tab = tab; state.rarity = null; renderShelf(); $('[
 function renderShelf() {
   const c = state.catalog, body = $('[data-shelf-body]'), tabs = $('[data-tabs]');
   for (const b of $('[data-mode]').children) b.setAttribute('aria-selected', b.dataset.mode === state.mode);
-  $('[data-item-search]').placeholder = state.mode === 'sets' ? t().findSet : state.mode === 'backdrops' ? t().findBackdrop : t().findItem;
+  $('[data-item-search]').placeholder = state.mode === 'sets' ? t().findSet : state.mode === 'backdrops' ? t().findBackdrop : state.mode === 'couriers' ? t().findCourier : t().findItem;
   if (state.mode === 'backdrops') { tabs.hidden = true; rarities([]); return body.replaceChildren(backdropCards()); }
   if (state.mode === 'effigy') { tabs.hidden = true; rarities([]); return body.replaceChildren(effigyCards()); }
+  if (state.mode === 'couriers') { tabs.hidden = true; rarities([]); return body.replaceChildren(petCards()); }
   if (!c) { tabs.replaceChildren(); $('[data-rarities]').replaceChildren(); body.replaceChildren(); return; }
   const slots = c.slots.filter((s) => applies(s.name));
   // The gems of what takes one: a tab of their own (Terrorblade's arcana: his colour).
@@ -474,6 +475,37 @@ fetch('backgrounds/index.json').then((r) => (r.ok ? r.json() : { backgrounds: []
   backdrop.list = (d.backgrounds || []).map((b) => ({ ...b, url: `backgrounds/${b.file}` })); setBackdrop(savedBackdrop === 'none' ? null : savedBackdrop || 'dashboard', false);
 }).catch(() => {});
 
+// ---------------------------------------------------------------- couriers and wards
+// Any hero's (couriers.json): they stand beside him as pets, and stay when he changes. The address
+// keeps them as slots of their own: courier=10018.1,ward=10006.
+const PETS = ['courier', 'ward'];
+const takePets = (worn) => { for (const k of PETS) if (worn[k]) state.pets[k] = worn[k]; };
+const petsList = () => (state.couriers ||= fetch('couriers.json').then((r) => (r.ok ? r.json() : { couriers: [], wards: [] })).catch(() => ({ couriers: [], wards: [] })));
+async function setPet(kind, id, style = 0, write = true) {
+  const list = (await petsList())[`${kind}s`], it = id != null && list.find((x) => x.id === +id);
+  state.pets[kind] = it ? [+id, style] : null;
+  if (write && state.current) writeHash(); if (state.mode === 'couriers') renderShelf();
+  await viewer.wear(kind, state.pets[kind] ? `items/${id}/` : null, style).catch((e) => console.error(e));
+}
+function petCards() {
+  const box = el('div', {}); petsList().then((d) => {
+    const q = state.itemQuery.trim().toLowerCase(), parts = [];
+    for (const kind of PETS) {
+      const list = d[`${kind}s`] || [], now = state.pets[kind], shownId = now?.[0] ?? null, shown = list.find((x) => x.id === shownId);
+      if (shown && shown.styles.length > 1 && now) parts.push(section(`${t()[kind]} · ${t().style}`, null, chips(shown.styles.map((st, i) => [st.name?.[lang] || st.name?.en || String(i + 1), i === (now?.[1] || 0), () => setPet(kind, shown.id, i)]))));
+      const items = list.filter((x) => !q || [x.name[lang], x.name.en].some((n) => n?.toLowerCase().includes(q)));
+      const none = card({ label: t()[kind], pic: null, name: t().noPet, pressed: !now, onclick: () => setPet(kind, null) });
+      if (items.length) parts.push(section(t()[kind], String(items.length), el('div', { className: 'cards' }, ...(q ? [] : [none]), ...items.map((x) => card({
+        label: x.default ? t().defaultItem : rarityName(x.rarity), pic: x.styles[now?.[0] === x.id ? now[1] : 0]?.icon || x.styles.find((st) => st.icon)?.icon ? `items/${x.id}/${x.styles[now?.[0] === x.id ? now[1] : 0]?.icon || x.styles.find((st) => st.icon).icon}` : null,
+        badge: x.id === shownId ? t().worn : x.styles.length > 1 ? `${x.styles.length} ${t().styles}` : null,
+        name: x.name[lang] || x.name.en, color: x.default ? null : RARITY[x.rarity], pressed: x.id === shownId, onclick: () => setPet(kind, x.id),
+      })))));
+    }
+    box.replaceChildren(...(parts.length ? parts : [el('p', { className: 'empty', textContent: t().noItems })]));
+  });
+  return box;
+}
+
 // ---------------------------------------------------------------- effigies
 // The hero as a statue of the game's effigies' stuffs, on their pedestals; the pause holds his pose.
 const STUFFS = { gold: '#e0a040', frost: '#9fd0ff', jade: '#3fa36a', stone: '#8a8580' };
@@ -560,7 +592,7 @@ document.addEventListener('keydown', (e) => {
 window.addEventListener('hashchange', () => {
   const { id, worn, gems: g0, unusual: u0, kinetic: k0 } = parseHash(); if (id !== state.current?.id) return open(id);
   const moved = (o) => Object.fromEntries(Object.entries(o).map(([slot, v]) => [slotNow(worn, slot), v])), gems = moved(g0), unusual = moved(u0), kinetic = moved(k0);
-  dress(worn);
+  dress(worn); if (PETS.some((k) => JSON.stringify(worn[k] || null) !== JSON.stringify(state.pets[k]))) for (const k of PETS) setPet(k, worn[k]?.[0] ?? null, worn[k]?.[1] ?? 0, false);
   // The gems it names, in the items it names (those still loading take theirs when they are on).
   for (const slot of new Set([...Object.keys(state.gems), ...Object.keys(gems)])) { if (gems[slot] && state.worn[slot]) state.gems[slot] = gems[slot]; else delete state.gems[slot]; viewer.gem(slot, gemHex(gemOf(slot))); }
   for (const slot of new Set([...Object.keys(state.unusual), ...Object.keys(unusual)])) { if (unusual[slot] && state.worn[slot]) state.unusual[slot] = unusual[slot]; else delete state.unusual[slot]; viewer.unusual(slot, state.unusual[slot] ?? null); }

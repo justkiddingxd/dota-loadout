@@ -90,6 +90,8 @@ export class Loadout {
   readonly address: string;
   heroes(): Promise<{ id: string; name: { en: string; ru: string }; attribute: string; animations: Animation[] }[]>;
   catalogOf(hero: string): Promise<Catalog>;
+  /** Couriers and wards (any hero's): wear('courier' | 'ward', id, style) puts one beside him. */
+  couriers(): Promise<{ couriers: { id: number; name: { en: string; ru: string }; rarity: string; default?: true; styles: { name: { en: string; ru: string } | null; icon: string | null }[] }[]; wards: { id: number; name: { en: string; ru: string }; rarity: string; default?: true; styles: { name: { en: string; ru: string } | null; icon: string | null }[] }[] }>;
   gemColours(): Promise<{ key: string; hex: string; name: { en: string; ru: string } }[]>;
   wear(slot: string, id: number | null, style?: number): Promise<void>;
   gem(slot: string, key: string | null): Promise<void>;

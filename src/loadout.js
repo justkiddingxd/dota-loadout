@@ -40,6 +40,9 @@ export function abilityOf(system, abilities) {
   return top > 0 && scores.filter((x) => x === top).length === 1 ? i : -1;
 }
 
+// A courier and a ward are any hero's (couriers.json): slots of their own beside his.
+const PETS = ['courier', 'ward'];
+
 const json = (url) => fetch(url).then((r) => { if (!r.ok) throw new Error(`${url}: ${r.status}`); return r.json(); });
 
 export class Loadout {
@@ -54,6 +57,8 @@ export class Loadout {
   async heroes() { return (this.index ||= await json(this.url('heroes/index.json'))).heroes; }
   // A hero's catalog: his slots and items with their rarities, styles, sets.
   async catalogOf(hero) { if (!this.catalogs.has(hero)) this.catalogs.set(hero, json(this.url(`heroes/${hero}/items.json`)).catch(() => ({ slots: [], items: {}, sets: [] }))); return this.catalogs.get(hero); }
+  // Couriers and wards: { couriers: [{ id, name, rarity, styles }], wards: […] }.
+  async couriers() { return (this.pets ||= await json(this.url('couriers.json')).catch(() => ({ couriers: [], wards: [] }))); }
   // The prismatic gems' colours (gems.json): [{ key, hex, name }].
   async gemColours() { return (this.palette ||= (await json(this.url('gems.json')).catch(() => ({ prismatic: [] }))).prismatic); }
 
@@ -74,6 +79,7 @@ export class Loadout {
 
   // Puts an item on a slot (null: its default), in a style; the hero changes form when it asks.
   async wear(slot, id, style = 0) {
+    if (PETS.includes(slot)) { this.worn[slot] = id != null ? [+id, style] : null; return this.viewer.wear(slot, id != null ? this.url(`items/${id}/`) : null, style); }
     const it = id != null && this.catalog?.items[id];
     if (this.worn[slot]?.[0] !== id) { delete this.gems[slot]; delete this.unusual[slot]; delete this.kinetic[slot]; this.viewer.gem(slot, null); this.viewer.unusual(slot, null); this.viewer.kinetic(slot, null); }
     this.worn[slot] = it && !it.default ? [+id, style] : null;
@@ -99,14 +105,14 @@ export class Loadout {
     return forms.find((x) => p && own(x.slot) === p)?.form || (p ? `persona${p}` : forms.find((x) => !own(x.slot))?.form) || null;
   }
   // A slot dresses the hero as he is (a persona's slots only in it, his own only out of it).
-  applies(slot) { const s = this.catalog?.slots.find((x) => x.name === slot), p = this.personaOf(this.worn); return !!s && (s.persona ? s.persona === p : !p || slot === 'persona_selector'); }
+  applies(slot) { if (PETS.includes(slot)) return true; const s = this.catalog?.slots.find((x) => x.name === slot), p = this.personaOf(this.worn); return !!s && (s.persona ? s.persona === p : !p || slot === 'persona_selector'); }
   // What an address names that the catalog has: an item the game moved goes to its slot now, and its
   // set's item takes the slot it left (Terrorblade's arcana: once his head, now his base and horns).
   valid(worn) {
     const c = this.catalog, out = {};
-    for (const [, w] of Object.entries(worn)) { const it = c?.items[w[0]]; if (it && !it.default) out[it.slot] = [+w[0], w[1] || 0]; }
+    for (const [slot, w] of Object.entries(worn)) { const it = c?.items[w[0]]; if (PETS.includes(slot)) out[slot] = [+w[0], w[1] || 0]; else if (it && !it.default) out[it.slot] = [+w[0], w[1] || 0]; }
     for (const [slot, w] of Object.entries(worn)) {
-      const it = c?.items[w[0]]; if (!it || it.default || it.slot === slot || out[slot] || !it.set) continue;
+      const it = c?.items[w[0]]; if (PETS.includes(slot) || !it || it.default || it.slot === slot || out[slot] || !it.set) continue;
       const mate = Object.entries(c.items).find(([, x]) => x.set === it.set && x.slot === slot && !x.default); if (mate) out[slot] = [+mate[0], 0];
     }
     return out;

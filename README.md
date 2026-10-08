@@ -155,7 +155,10 @@ Taunts are items of the `taunt` slot: their activity modifier picks the hero's t
 Emblems (the effect at a hero's feet) are any hero's: built once, a slot of every catalog. The heroes'
 loading screens — those for a hero or sold with his items — are the site's backdrops
 (`node tools/build-screens.mjs`: `assets/screens/<id>.webp`, `assets/heroes/<id>/screens.json`), and
-`node tools/build-effigies.mjs` builds the effigies' pedestals (`assets/effigies/<stuff>/`).
+`node tools/build-effigies.mjs` builds the effigies' pedestals (`assets/effigies/<stuff>/`). Couriers and
+wards stand beside any hero as pets (`node tools/build-couriers.mjs`: `assets/items/<id>/`, listed in
+`assets/couriers.json`; a courier's flying model is a style): `viewer.wear('courier', 10018, 1)`, or
+`courier=10018.1,ward=10006` in an address. Their effects ride on their own skeleton.
 
 Items go to `assets/items/<id>/` (models, materials and effects of all their styles), each hero's catalog
 to `assets/heroes/<id>/items.json`. They are not kept in git (about 250 KB an item, 10 000 items).
@@ -191,4 +194,4 @@ Loadout — все герои Dota 2 в браузере на three.js: игро
 `node tools/build-items.mjs` собирает предметы, `node tools/update.mjs` после патча берёт новое и выкладывает
 (на сервере раз в сутки, `loadout-update.timer`; подробности выше, в Cosmetics). На сайте есть насмешки,
 эмблемы, эффекты способностей у предметов, загрузочные экраны героя как фон и статуи-эффигии (золото, лёд,
-нефрит, камень).
+нефрит, камень). Курьеры и варды встают рядом с любым героем (режим «Курьер»).

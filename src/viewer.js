@@ -127,7 +127,7 @@ void main() {
     const tickets = (this.wearing ||= {}), ticket = (tickets[slot] = (tickets[slot] || 0) + 1);
     const current = () => hero === this.hero && ticket === tickets[slot];
     const item = typeof source === 'string' ? await fetchJson(source, 'item.json') : source;
-    if (current()) await hero.wear(slot, item, style, current);
+    if (current()) { const before = !!hero.companionReach(); await hero.wear(slot, item, style, current); if (before || hero.companionReach()) this.frameView(); }
   }
   get worn() { return this.hero?.worn || {}; }
   // A prismatic gem in what a slot wears: '#rrggbb', or null.
@@ -170,9 +170,19 @@ void main() {
     Object.assign(this.sun.shadow.camera, { left: -r, right: r, top: r, bottom: -r, near: r * 0.5, far: r * 6 }); this.sun.shadow.camera.updateProjectionMatrix();
     // Framing: the camera looks level at the hero from far enough to fit him whole; with 'hero' the
     // pedestal shows only as far as it fits under him, the view a little lower to leave it room.
-    const frame = this.options.framing === 'hero' ? hero.heroBox : box, fsize = frame.getSize(new THREE.Vector3());
+    this.frameView(hero);
+  }
+  // The view: the hero (and pedestal), and the companions beside him (a courier, a ward, a pet) all
+  // the way round the turntable, so that they stay in it as he turns.
+  frameView(hero = this.hero) {
+    if (!hero) return;
+    const frame = (this.options.framing === 'hero' ? hero.heroBox : hero.box).clone(), r = hero.companionReach();
+    // Their reach across the view (their depth only moves them nearer or farther).
+    if (r) frame.union(new THREE.Box3(new THREE.Vector3(-r.radius, r.min, frame.min.z), new THREE.Vector3(r.radius, r.max, frame.max.z)));
+    const fsize = frame.getSize(new THREE.Vector3());
     this.view.center.copy(frame.getCenter(new THREE.Vector3())); this.view.size = fsize;
-    if (this.options.framing === 'hero' && hero.heroBox !== box) { this.view.center.y -= fsize.y * 0.1; this.view.size = fsize.clone().setY(fsize.y * 1.2); }
+    if (this.options.framing === 'hero' && hero.heroBox !== hero.box) { this.view.center.y -= fsize.y * 0.1; this.view.size = fsize.clone().setY(fsize.y * 1.2); }
+    this.place();
   }
 
   // ---- camera: the framing at any shape of the canvas.
@@ -444,10 +454,17 @@ async function buildHero(manifest, url, manager, time, light, textureScale = 1) 
   lib.loader.manager = manager;
   // Attachments by model: the hero's, and those of what each slot wears.
   const attachments = { ...manifest.attachments };
-  const attachment = (name, owner) => { for (const model of [owner, 'hero', ...worn.keys()]) { const at = attachments[model]?.[name]; if (at) return at; } return null; };
-  const attachmentMatrix = (at) => { const bone = bones[at.bones[0].toLowerCase()]; if (!bone) return null;
+  // What a slot's effects ride on: a companion that is all its item is (a courier, a ward), else the hero.
+  const rigOf = (owner) => { const w = worn.get(owner), c = w?.companion; return c?.bones && !w.meshes.length ? c : null; };
+  const rigOrigin = (c) => toSource(c.scene.matrixWorld.clone()).multiply(SOURCE_TO_GLTF);
+  const attachment = (name, owner) => {
+    const rig = rigOf(owner); if (rig) return rig.attachments[name] ? { ...rig.attachments[name], rig } : null;
+    for (const model of [owner, 'hero', ...worn.keys()]) { const at = attachments[model]?.[name]; if (at) return at; } return null;
+  };
+  const attachmentMatrix = (at) => { const bone = (at.rig?.bones || bones)[at.bones[0].toLowerCase()]; if (!bone) return null;
     return toSource(bone.matrixWorld.clone().multiply(new THREE.Matrix4().compose(new THREE.Vector3(...at.offsets[0]).multiplyScalar(0.0254), new THREE.Quaternion(...at.rotations[0]), new THREE.Vector3(1, 1, 1)))); };
-  const model = {
+  // The skeleton effects read (snapshots skinned to bones, bone-bound operators): the hero's, or a companion's.
+  function rigModel(bones, inverses) { return {
     bones: ((list) => (list.length ? list : Object.values(bones).filter((b) => b.isBone)))(Object.values(bones).filter((b) => b.name.endsWith('_JNT'))),
     bone: (name) => bones[name.toLowerCase()] || null,
     // A point in a bone's own space (inches), in the effects' space.
@@ -459,7 +476,8 @@ async function buildHero(manifest, url, manager, time, light, textureScale = 1) 
       for (const [name, w] of skin) { const b = bones[name.toLowerCase()], inv = inverses[name.toLowerCase()]; if (!b || !inv || !w) continue; t.copy(p).applyMatrix4(inv).applyMatrix4(b.matrixWorld); out.addScaledVector(t, w); total += w; }
       return total ? out.divideScalar(total).applyMatrix4(groupInverse) : pos.clone();
     },
-  };
+  }; }
+  const model = rigModel(bones, inverses);
 
   // Control points from a system's drivers: at the hero's origin or an attachment, following it or
   // fixed where it was when the effect started, plus the driver's offset. The world origin is the
@@ -490,7 +508,7 @@ async function buildHero(manifest, url, manager, time, light, textureScale = 1) 
   // where that point is as the item moves (skinned); null when the slot shows nothing of its own.
   const surfaces = new WeakMap();
   const surfaceOf = (owner) => {
-    const meshes = worn.get(owner)?.meshes?.filter((m) => m.visible && m.geometry?.attributes.position); if (!meshes?.length) return null;
+    const w = worn.get(owner), meshes = (w?.meshes?.length ? w.meshes : rigOf(owner)?.meshes)?.filter((m) => m.visible && m.geometry?.attributes.position); if (!meshes?.length) return null;
     let s = surfaces.get(meshes[0]);
     if (!s) {
       const tris = [], a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3(); let total = 0;
@@ -509,8 +527,9 @@ async function buildHero(manifest, url, manager, time, light, textureScale = 1) 
     return () => { out.set(0, 0, 0); for (let k = 0; k < 3; k++) out.addScaledVector(m.getVertexPosition(i[k], p), w[k]); return out.applyMatrix4(m.matrixWorld).applyMatrix4(groupInverse); };
   };
   const instance = (def, owner, drivers) => {
-    const sim = new Simulation(def, lib); sim.model = owner && owner !== 'hero' ? { ...model, surface: () => surfacePoint(owner) } : model;
-    const e = { sim, owner, drivers, fixed: new Map() }, origin = heroOrigin();
+    const rig = owner && owner !== 'hero' ? rigOf(owner) : null, sim = new Simulation(def, lib);
+    sim.model = owner && owner !== 'hero' ? { ...(rig?.model || model), surface: () => surfacePoint(owner) } : model;
+    const e = { sim, owner, drivers, rig, fixed: new Map() }, origin = rig ? rigOrigin(rig) : heroOrigin();
     for (const d of drivers) if (!follows(d)) e.fixed.set(d.cp, placeCP(d, owner, origin));
     return e;
   };
@@ -525,7 +544,8 @@ async function buildHero(manifest, url, manager, time, light, textureScale = 1) 
     const color = cpOf(new THREE.Matrix4().makeTranslation(g.r, g.g, g.b)), on = cpOf(new THREE.Matrix4().makeTranslation(1, 1, 0)); return [color, on]; };
   // A gem's points over the effect's own: its drivers may set CPs 15 and 16 as it looks without one
   // (Scythes of Sorrow's white, off), which the game's gem then overrides.
-  const drive = (e, origin) => {
+  const drive = (e, heroAt) => {
+    const origin = e.rig ? rigOrigin(e.rig) : heroAt;
     const cps = e.sim.cps; cps.clear(); cps.set(0, cpOf(origin)); cps.set(15, GEMLESS); cps.set(16, GEMLESS);
     for (const d of e.drivers) cps.set(d.cp, e.fixed.get(d.cp) || placeCP(d, e.owner, origin));
     for (const [cp, c] of e.aims || []) if (!e.drivers.some((d) => d.cp === cp)) cps.set(cp, c);
@@ -603,6 +623,14 @@ async function buildHero(manifest, url, manager, time, light, textureScale = 1) 
         if (e.kill || e.sim.finished || e.born > 20 || (e.born > 0.5 && e.sim.count() === 0 && e.sequence !== currentName)) { e.sim.dispose(); live.splice(i, 1); } }
       for (const e of [...effects, ...live]) e.sim.render(camera, groupInverse);
     },
+    // How far from his axis and how high the companions beside him reach (null: none).
+    companionReach() {
+      const groups = [...worn.values()].map((w) => w.companion?.group).filter((g) => g?.parent); if (!groups.length) return null;
+      turntable.updateMatrixWorld(true); const inv = turntable.matrixWorld.clone().invert(), b = new THREE.Box3();
+      for (const g of groups) b.union(new THREE.Box3().setFromObject(g, true).applyMatrix4(inv));
+      let radius = 0; for (const x of [b.min.x, b.max.x]) for (const z of [b.min.z, b.max.z]) radius = Math.max(radius, Math.hypot(x, z));
+      return { radius, min: b.min.y, max: b.max.y };
+    },
     // The rectangle the hero covers on screen (normalized device coordinates), with a small margin.
     screenBox(camera) {
       const s = new THREE.Box2();
@@ -675,10 +703,14 @@ async function buildHero(manifest, url, manager, time, light, textureScale = 1) 
           let companion = null;
           if (s.companion) {
             const c = s.companion, gltf = await loader.loadAsync(source.url(m.models[c.model])), group = new THREE.Group(), mixer = new THREE.AnimationMixer(gltf.scene);
-            dress(gltf.scene, m.materials, tex, source.url(''), itemCube); group.add(gltf.scene);
+            dress(gltf.scene, m.materials, tex, source.url(''), itemCube, m.skins?.[c.model]?.[(s.skin || 0) - 1]); group.add(gltf.scene);
             group.position.set(...c.offset).applyMatrix4(SOURCE_TO_GLTF); group.scale.setScalar(c.scale || 1);
             const clip = gltf.animations.find((x) => x.name === c.clip) || gltf.animations[0]; if (clip) mixer.clipAction(clip).play();
-            companion = { group, mixer };
+            // Its own skeleton, attachments and surface, for the effects it carries (a courier's).
+            const own = { bones: {}, inverses: {}, meshes: [] };
+            gltf.scene.traverse((o) => { if (o.isBone) own.bones[o.name.toLowerCase()] = o; if (o.isMesh) own.meshes.push(o); if (o.isSkinnedMesh) o.skeleton.bones.forEach((b, i) => { own.inverses[b.name.toLowerCase()] ||= o.skeleton.boneInverses[i]; }); });
+            companion = { group, mixer, scene: gltf.scene, ...own, attachments: m.attachments?.[c.model] || {} };
+            companion.model = rigModel(companion.bones, companion.inverses);
           }
           // The models it refits other items into, ready for when one of them is worn too.
           const refits = await Promise.all((s.refits || []).map(async (r) => {
