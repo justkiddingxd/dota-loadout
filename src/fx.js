@@ -785,11 +785,12 @@ const OP = {
   C_OP_SetControlPointOrientation(d) {
     const cp = d.m_nCP ?? 1, rot = vec(d.m_vecRotation), world = d.m_bUseWorldLocation, head = d.m_nHeadLocation ?? 0;
     return (ps, dt, s) => { const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(rot.z * Math.PI / 180, rot.x * Math.PI / 180, rot.y * Math.PI / 180, 'ZYX'));
+      if (s.parentTurns?.has(cp)) return;
       if (!world) q.premultiply(s.cp(head).quat); s.setCPRotation(cp, q); };
   },
   C_OP_SetParentControlPointsToChildCP(d) {
     const childCP = d.m_nChildControlPoint ?? 0, count = d.m_nNumControlPoints ?? 1, first = d.m_nFirstSourcePoint ?? 0, group = d.m_nChildGroupID ?? 0, orient = d.m_bSetOrientation;
-    return (ps, dt, s) => { const kids = s.sim.children.filter((c) => c.groupId === group); for (let i = 0; i < Math.min(count, kids.length); i++) { const src = s.cp(first + i); kids[i].state.override(childCP, src.pos, orient ? src.quat : null); } };
+    return (ps, dt, s) => { const kids = s.sim.children.filter((c) => c.groupId === group); for (let i = 0; i < Math.min(count, kids.length); i++) { const src = s.cp(first + i); kids[i].state.override(childCP, src.pos, orient ? src.quat : null, true); } };
   },
   // Each child gets a control point at one of this system's particles. With m_bSetOrientation it
   // takes the particle's orientation: particles locked to a control point with its rotation (the
@@ -1333,7 +1334,7 @@ class State {
   cp(i) { return this.own.get(i) || (this.parent ? this.parent.cp(i) : this.sim.root.cps.get(i) || this.sim.root.cps.get(0) || new ControlPoint()); }
   setCP(i, pos) { const c = this.own.get(i) || new ControlPoint(); c.pos.copy(pos); this.own.set(i, c); }
   setCPRotation(i, q) { const c = this.own.get(i) || Object.assign(new ControlPoint(), { pos: this.cp(i).pos.clone() }); c.quat.copy(q); this.own.set(i, c); }
-  override(i, pos, quat) { const c = this.own.get(i) || new ControlPoint(); c.pos.copy(pos); if (quat) c.quat.copy(quat); this.own.set(i, c); }
+  override(i, pos, quat, byParent = false) { const c = this.own.get(i) || new ControlPoint(); c.pos.copy(pos); if (quat) c.quat.copy(quat); this.own.set(i, c); if (byParent && quat) (this.parentTurns ||= new Set()).add(i); }
   // The snapshot on a control point: a parent's on it goes before the system's own (Scythes of
   // Sorrow's right edge puts edge_r on CP 6 over its child's edge_l, the left one), then any.
   snapshot(cp) { return this.parent?.snapshotOn(cp) || this.snapshotOn(cp) || this.sim.snapshot || this.parent?.snapshot(cp) || null; }
