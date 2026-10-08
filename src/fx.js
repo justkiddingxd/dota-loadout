@@ -357,7 +357,7 @@ const INIT = {
   C_INIT_InitFromCPSnapshot(d) {
     const cp = d.m_nControlPointNumber ?? 0, random = d.m_bRandom, attr = field(d.m_nAttributeToRead, F.Position);
     return (p, s) => { const snap = s.snapshot(cp); if (!snap || attr !== F.Position) return; const i = random ? Math.floor(rnd() * snap.count) : p.uid % snap.count; p.snap = i;
-      p.pos.copy(snap.point(i, s.cp(cp).matrix())); p.prev.copy(p.pos); if (snap.data.bone && s.model) p.bone = s.model.bone(snap.data.bone); };
+      p.pos.copy(snap.point(i, s.cp(cp).matrix())); p.prev.copy(p.pos); if (snap.data.bone && s.model) p.bone = s.model.bone(snap.boneName()); };
   },
   C_INIT_CreateOnModel(d) {
     return (p, s) => { const m = s.model; if (!m) return;
@@ -1704,13 +1704,26 @@ export class Library {
   dispose() { this.group.traverse((o) => { o.geometry?.dispose(); o.material?.dispose(); }); for (const { texture } of this.cache.values()) texture?.dispose(); }
 }
 
+// A bone's twin on the other side (RightWeapon0_JNT, LeftWeapon0_JNT), if the name has a side.
+const SIDES = [[/Right/, 'Left'], [/Left/, 'Right'], [/right/, 'left'], [/left/, 'right'], [/_R(?=_|\d|$)/, '_L'], [/_L(?=_|\d|$)/, '_R'], [/_r(?=_|\d|$)/, '_l'], [/_l(?=_|\d|$)/, '_r']];
+const twin = (name) => { for (const [re, side] of SIDES) if (re.test(name)) return name.replace(re, side); return null; };
+
 // Snapshot points follow the hero: skinned by their bones, or rigid with the snapshot's control point.
 class Snapshot {
   constructor(data, sim) { this.data = data; this.sim = sim; this.count = data.position?.length || 0; }
+  // A rigid snapshot is fitted to one bone (the builder's); one of a pair (a blade of two) goes on the
+  // twin nearer the effect's control point 0: each sword's glow on its own sword.
+  boneName() {
+    if (this.bone !== undefined) return this.bone;
+    const m = this.sim.root.model, name = this.data.bone, other = name && twin(name), a = m?.bone(name), b = other && m?.bone(other);
+    if (!a || !b) return (this.bone = name);
+    const at = this.sim.state.cp(0).pos;
+    return (this.bone = m.bonePosition(b).distanceTo(at) < m.bonePosition(a).distanceTo(at) ? other : name);
+  }
   point(i, local) {
     const m = this.sim.root.model, pos = new THREE.Vector3(...this.data.position[i]), skin = this.data.skinning?.[i];
     if (m && skin?.length) return m.skin(pos, skin);
-    if (m && this.data.bone) return m.boneLocal(this.data.bone, pos);
+    if (m && this.data.bone) return m.boneLocal(this.boneName(), pos);
     if (local) return pos.applyMatrix4(local);
     return pos.applyMatrix4(this.sim.state.cp(0).matrix());
   }
