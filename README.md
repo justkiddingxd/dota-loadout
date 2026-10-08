@@ -5,49 +5,79 @@ loadout lighting, animations and particle effects.
 
 **Demo:** https://loadout.nyan.cafe/ · **Repo:** https://github.com/justkiddingxd/dota-loadout
 
-- **Viewer** (`src/`) — a small ES module: `new HeroViewer(canvas)`, `await viewer.load(url)`, `viewer.play(name)`.
-- **Heroes** (`assets/heroes/`) — all heroes in their default look, ready to load: compressed glTF
-  models, WebP textures and one `hero.json` each.
-- **Pipeline** (`tools/`) — rebuilds those folders from your own installed copy of the game after a patch.
+- **Library** (`src/`, `npm i dota-loadout three`) — `new HeroViewer(canvas)`, `await viewer.load('pudge')`,
+  a `Loadout` that dresses a hero as the site does, and a `<dota-hero>` element.
+- **Heroes and items** (`assets/`) — all heroes and ~11 000 of their items, ready to load: compressed glTF
+  models, WebP textures, one `hero.json` / `item.json` each. Served from https://loadout.nyan.cafe/ (open to
+  any site), which the library loads from by default.
+- **Pipeline** (`tools/`) — rebuilds those folders from the game's files after a patch (`tools/update.mjs`).
 - **Site** (`site/`) — the demo above.
 
-## Use the viewer
+## Use the library
 
-```html
-<canvas id="hero" style="width: 640px; height: 720px"></canvas>
-<script type="importmap">
-{ "imports": {
-  "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js",
-  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/",
-  "dota-loadout": "./dota-loadout/src/index.js"
-} }
-</script>
-<script type="module">
-  import { HeroViewer } from 'dota-loadout';
-
-  const viewer = new HeroViewer(document.getElementById('hero'));
-  const hero = await viewer.load('./heroes/nevermore/');   // a folder from assets/heroes
-  console.log(hero.animations);                            // [{ name, activity, loop, duration }, …]
-  viewer.play('attack01_anim');                            // plays once, then back to the idle
-</script>
+```sh
+npm i dota-loadout three
 ```
 
-With a bundler: `npm i three dota-loadout` and `import { HeroViewer } from 'dota-loadout'`. Serve the hero folders from your own origin
-(textures and models are fetched at runtime).
+The quickest: an element, no code.
+
+```html
+<script type="module">import 'dota-loadout/element';</script>
+
+<dota-hero hero="juggernaut" style="width: 480px; height: 640px"></dota-hero>
+<!-- a hero as the site's address has him: items, styles, gems, unusual effects, kinetic gems -->
+<dota-hero loadout="#terrorblade/hero_base=5957~gold,weapon=12917,back=9750" animation="loadout"></dota-hero>
+```
+
+Attributes: `hero`, `loadout`, `animation`, `assets`, `controls` (`true`, `hero`, `false`), `wheel`
+(`zoom`, `turn`, `false`), `bloom` (a strength or `false`). `element.viewer` and `element.loadout` are the
+objects below; `load` and `progress` events tell how loading goes.
+
+The viewer, for your own canvas:
+
+```js
+import { HeroViewer, Loadout } from 'dota-loadout';
+
+const viewer = new HeroViewer(document.getElementById('hero'));
+const hero = await viewer.load('nevermore');               // an id, or a hero folder's address
+console.log(hero.animations);                              // [{ name, activity, loop }, …]
+viewer.play('attack01_anim');                              // plays once, then back to the idle
+await viewer.wear('weapon', 6058);                         // an item's id (or folder), in a style
+viewer.paused = true;                                      // stands still; he still turns
+
+// A whole outfit, as the site does it: the hero's form for an arcana or a persona, prismatic gems,
+// unusual effects, kinetic gems. Catalogs: heroes/<id>/items.json.
+const look = new Loadout(viewer);
+await look.show('#crystal_maiden/head=4388^13');           // the site's address (# optional)
+await look.show('terrorblade', { hero_base: 5957, weapon: [12917, 0] }, { gems: { hero_base: 'gold' } });
+await look.wear('back', 9750); await look.gem('hero_base', 'rubiline');
+look.kinetics;                                             // the hero's kinetic gems: [{ id, name, changes }]
+look.address;                                              // '#terrorblade/hero_base=5957~rubiline,…'
+```
+
+Without a bundler, an import map: `"three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js"`,
+`"three/addons/": "…/examples/jsm/"`, `"dota-loadout": "https://cdn.jsdelivr.net/npm/dota-loadout/src/index.js"`.
+Types are included (`src/index.d.ts`). To serve the heroes yourself, copy `assets/` (or build it with the
+pipeline) and pass `assets: 'https://your.host/'`.
 
 ### Options
 
 ```js
 new HeroViewer(canvas, {
+  assets: 'https://loadout.nyan.cafe/', // where ids are looked up
   controls: true,      // drag to turn: true, 'hero' (only when the drag starts on the hero), false
   wheel: 'zoom',       // 'zoom', 'turn' or false
   framing: 'hero',     // 'hero' (fit the hero) or 'full' (hero and pedestal whole)
   pixelRatio: 2,
   textureScale: 1,     // 0.5 by default on phones and machines of 4 GB or less: a quarter of the GPU memory
   softParticles: true, // effects fade where they meet the hero (depth feathering): one more depth pass a frame
+  bloom: 0.35,         // the halo of what is brighter than white, or false
   onProgress: (loaded, total) => {},
   onAnimation: (name) => {},
 });
+viewer.gem(slot, '#rrggbb')          // a prismatic gem's colour in a slot's item
+viewer.unusual(slot, id)             // an unusual effect of the item's list
+viewer.kinetic(slot, activities)     // a kinetic gem's [[activity, modifier]]
 viewer.rotate(angle, { relative })   // turn the hero (radians), eased
 viewer.zoom(1.5)                     // 0.6 – 3
 viewer.dispose()

@@ -34,6 +34,8 @@ img { display: block; }
 
 /* ---- the hero */
 .stage { position: relative; overflow: hidden; background: #000; min-height: 0; }
+/* A backdrop: the game's background, covering, its floor near the pedestal's; a vignette over it. */
+.stage.backdrop { background-color: #000; background-repeat: no-repeat; background-size: cover, cover; background-position: center, center var(--floor, 85%); }
 .view { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
 .view:active { cursor: grabbing; }
 .bar { position: absolute; left: 10px; right: 10px; display: flex; align-items: center; justify-content: space-between; gap: 8px; pointer-events: none; z-index: 2; }
@@ -116,6 +118,8 @@ img { display: block; }
 .card .marks i { width: 8px; height: 8px; border-radius: 50%; background: var(--g, #c18bff); box-shadow: 0 0 6px var(--g, #c18bff); border: 1px solid rgba(0, 0, 0, 0.5); }
 .card b { display: -webkit-box; margin-top: 7px; font-weight: 500; font-size: 11.5px; line-height: 1.25; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-height: 2.5em; }
 .card.gem .pic { background: #4a4b4f; }
+.cards.backdrops { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
+.card.backdrop .pic { aspect-ratio: 16 / 9; background: #000; }
 .card.set .pic { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 1px; background: #0c0d0f; }
 .card.set .pic img { min-height: 0; }
 .card.set .pic.n1 { grid-template-columns: 1fr; grid-template-rows: 1fr; }

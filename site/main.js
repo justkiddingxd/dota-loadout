@@ -2,26 +2,26 @@ import { HeroViewer } from '../src/index.js';
 
 const T = {
   ru: {
-    heroes: 'Герои', items: 'Предметы', sets: 'Сеты', all: 'Все', search: 'Найти героя', findItem: 'Найти предмет', findSet: 'Найти сет', allRarities: 'Все',
+    heroes: 'Герои', items: 'Предметы', sets: 'Сеты', backdrops: 'Фон', backdrop: 'Фон', noBackdrop: 'Без фона', findBackdrop: 'Найти фон', all: 'Все', search: 'Найти героя', findItem: 'Найти предмет', findSet: 'Найти сет', allRarities: 'Все',
     attrs: { str: 'Сила', agi: 'Ловкость', int: 'Интеллект', all: 'Универсал' }, short: { str: 'STR', agi: 'AGI', int: 'INT', all: 'UNI' },
     saveFrame: 'Кадр', saveVideo: 'Видео', stop: 'Стоп', pause: 'Пауза', play: 'Пуск', recenter: 'Вид', share: 'Ссылка', shared: 'Ссылка скопирована', embed: 'Встроить', copy: 'Копировать', copied: 'Скопировано',
     saved: 'Сохранено', noVideo: 'Браузер не умеет записывать видео', reset: 'Сбросить', worn: 'Надето', defaultItem: 'Стандарт', styles: 'стил.', style: 'Стиль', unusual: 'Необычный эффект', noUnusual: 'Нет', kinetic: 'Кинетический самоцвет', kineticTip: 'меняет анимации',
     gem: 'Призматический самоцвет', gemCard: 'Самоцвет', gemTab: 'Самоцвет', noGem: 'Без самоцвета', itemsN: 'предм.', noItems: 'Ничего не нашлось', nothing: 'Никого не нашлось',
     loading: 'Загрузка', failed: 'Не удалось загрузить героя', animation: 'Анимация',
-    embedTitle: 'Встроить героя', embedText: 'Рендерер — обычный ES-модуль поверх three.js. Положи папку героя рядом со страницей и подключи:',
-    embedFine: 'Папки героев собираются из файлов игры командой npm run heroes, подробности в README.',
+    embedTitle: 'Встроить героя', embedText: 'Герой в этом же наряде на любой странице: элемент <dota-hero> из пакета dota-loadout (npm i dota-loadout three). Модели грузятся с этого сайта.',
+    embedFine: 'Свой canvas, класс Loadout, свои ассеты — в README на GitHub.',
     rarity: { common: 'Обычный', uncommon: 'Необычный', rare: 'Редкий', mythical: 'Мифический', legendary: 'Легендарный', immortal: 'Бессмертный', arcana: 'Аркана', ancient: 'Древний', seasonal: 'Сезонный' },
     acts: { LOADOUT: 'Стойка', IDLE: 'Покой', IDLE_RARE: 'Редкий покой', RUN: 'Бег', ATTACK: 'Атака', ATTACK2: 'Атака II', SPAWN: 'Появление', TELEPORT: 'Телепорт', DISABLED: 'Оглушение', VICTORY: 'Победа', DEFEAT: 'Поражение', TAUNT: 'Насмешка', DIE: 'Смерть', GENERIC_CHANNEL_1: 'Концентрация', CAST_ABILITY: 'Способность' },
   },
   en: {
-    heroes: 'Heroes', items: 'Items', sets: 'Sets', all: 'All', search: 'Find a hero', findItem: 'Find an item', findSet: 'Find a set', allRarities: 'All',
+    heroes: 'Heroes', items: 'Items', sets: 'Sets', backdrops: 'Backdrop', backdrop: 'Backdrop', noBackdrop: 'None', findBackdrop: 'Find a backdrop', all: 'All', search: 'Find a hero', findItem: 'Find an item', findSet: 'Find a set', allRarities: 'All',
     attrs: { str: 'Strength', agi: 'Agility', int: 'Intelligence', all: 'Universal' }, short: { str: 'STR', agi: 'AGI', int: 'INT', all: 'UNI' },
     saveFrame: 'Save frame', saveVideo: 'Save video', stop: 'Stop', pause: 'Pause', play: 'Play', recenter: 'Recenter', share: 'Link', shared: 'Link copied', embed: 'Embed', copy: 'Copy', copied: 'Copied',
     saved: 'Saved', noVideo: 'This browser cannot record video', reset: 'Reset', worn: 'Worn', defaultItem: 'Default', styles: 'styles', style: 'Style', unusual: 'Unusual effect', noUnusual: 'None', kinetic: 'Kinetic gem', kineticTip: 'changes animations',
     gem: 'Prismatic gem', gemCard: 'Prismatic gem', gemTab: 'Gem', noGem: 'No gem', itemsN: 'items', noItems: 'Nothing found', nothing: 'Nobody by that name',
     loading: 'Loading', failed: 'Could not load the hero', animation: 'Animation',
-    embedTitle: 'Embed a hero', embedText: 'The renderer is a plain ES module on top of three.js. Put a hero’s folder next to your page and:',
-    embedFine: 'Hero folders are built from the game’s files with npm run heroes; see the README.',
+    embedTitle: 'Embed a hero', embedText: 'The hero in this outfit on any page: the <dota-hero> element of the dota-loadout package (npm i dota-loadout three). Models load from this site.',
+    embedFine: 'Your own canvas, the Loadout class, your own assets: see the README on GitHub.',
     rarity: {},
     acts: { LOADOUT: 'Loadout', IDLE: 'Idle', IDLE_RARE: 'Rare idle', RUN: 'Run', ATTACK: 'Attack', ATTACK2: 'Attack II', SPAWN: 'Spawn', TELEPORT: 'Teleport', DISABLED: 'Stunned', VICTORY: 'Victory', DEFEAT: 'Defeat', TAUNT: 'Taunt', DIE: 'Death', GENERIC_CHANNEL_1: 'Channel', CAST_ABILITY: 'Ability' },
   },
@@ -55,7 +55,7 @@ function applyTexts() {
   $('[data-save-frame]').textContent = t().saveFrame; $('[data-reset]').textContent = t().recenter;
   renderPause(); renderRecord();
   for (const n of document.querySelectorAll('[data-t]')) n.textContent = t()[n.dataset.t];
-  $('[data-mode]').replaceChildren(...['items', 'sets'].map((m) => { const b = el('button', { type: 'button', role: 'tab', textContent: t()[m] }); b.dataset.mode = m; b.onclick = () => setMode(m); return b; }));
+  $('[data-mode]').replaceChildren(...['items', 'sets', 'backdrops'].map((m) => { const b = el('button', { type: 'button', role: 'tab', textContent: t()[m] }); b.dataset.mode = m; b.onclick = () => setMode(m); return b; }));
   $('[data-attrs]').replaceChildren(...ATTRS.map((a) => {
     const b = el('button', { type: 'button', title: t().attrs[a] }, el('img', { src: `attributes/${a}.webp`, alt: '' }), t().short[a]);
     b.setAttribute('aria-pressed', state.filter.has(a)); b.onclick = () => { state.filter.has(a) ? state.filter.delete(a) : state.filter.add(a); applyTexts(); }; return b;
@@ -315,7 +315,8 @@ function setTab(tab) { state.tab = tab; state.rarity = null; renderShelf(); $('[
 function renderShelf() {
   const c = state.catalog, body = $('[data-shelf-body]'), tabs = $('[data-tabs]');
   for (const b of $('[data-mode]').children) b.setAttribute('aria-selected', b.dataset.mode === state.mode);
-  $('[data-item-search]').placeholder = state.mode === 'sets' ? t().findSet : t().findItem;
+  $('[data-item-search]').placeholder = state.mode === 'sets' ? t().findSet : state.mode === 'backdrops' ? t().findBackdrop : t().findItem;
+  if (state.mode === 'backdrops') { tabs.hidden = true; rarities([]); return body.replaceChildren(backdropCards()); }
   if (!c) { tabs.replaceChildren(); $('[data-rarities]').replaceChildren(); body.replaceChildren(); return; }
   const slots = c.slots.filter((s) => applies(s.name));
   // The gems of what takes one: a tab of their own (Terrorblade's arcana: his colour).
@@ -408,6 +409,37 @@ function setCard(set, rarity) {
 }
 $('[data-item-search]').addEventListener('input', (e) => { state.itemQuery = e.target.value; renderShelf(); });
 
+// ---------------------------------------------------------------- backdrops
+// The game's own backgrounds behind the hero (backgrounds/index.json): the dashboard's smoke by
+// default, as in the game; the viewer's choice is kept in this browser.
+const backdrop = { list: [], current: null, image: null };
+const savedBackdrop = (() => { try { return localStorage.getItem('loadout-backdrop'); } catch { return null; } })();
+// The part of an image that covers a w×h box, its floor (0 top, 1 bottom) a little above the box's bottom.
+function cover(img, w, h, floor = 0.85) {
+  const s = Math.max(w / img.naturalWidth, h / img.naturalHeight), sw = w / s, sh = h / s, sx = (img.naturalWidth - sw) / 2;
+  const sy = Math.min(Math.max(floor * img.naturalHeight - 0.82 * sh, 0), img.naturalHeight - sh); return [sx, sy, sw, sh];
+}
+function setBackdrop(key, save = true) {
+  const b = backdrop.list.find((x) => x.key === key) || null, stage = $('[data-stage]'); backdrop.current = b;
+  if (save) { try { localStorage.setItem('loadout-backdrop', b ? b.key : 'none'); } catch { /* private mode */ } }
+  if (!b) { backdrop.image = null; stage.style.backgroundImage = ''; stage.classList.remove('backdrop'); }
+  else {
+    const url = `backgrounds/${b.file}`, img = new Image(); img.src = url; backdrop.image = img;
+    stage.style.backgroundImage = `radial-gradient(ellipse at 50% 60%, transparent 35%, rgba(0, 0, 0, 0.55)), url("${url}")`;
+    stage.style.setProperty('--floor', `${Math.round((b.floor ?? 0.85) * 100)}%`); stage.classList.add('backdrop');
+  }
+  if (state.mode === 'backdrops') renderShelf();
+}
+function backdropCards() {
+  const q = state.itemQuery.trim().toLowerCase(), list = backdrop.list.filter((b) => !q || [b.name[lang], b.name.en].some((n) => n?.toLowerCase().includes(q)));
+  return el('div', { className: 'cards backdrops' },
+    card({ label: t().backdrop, pic: null, name: t().noBackdrop, pressed: !backdrop.current, onclick: () => setBackdrop(null), kind: 'backdrop' }),
+    ...list.map((b) => card({ label: t().backdrop, pic: `backgrounds/${b.file}`, name: b.name[lang] || b.name.en, pressed: backdrop.current === b, onclick: () => setBackdrop(b.key), kind: 'backdrop' })));
+}
+fetch('backgrounds/index.json').then((r) => (r.ok ? r.json() : { backgrounds: [] })).then((d) => {
+  backdrop.list = d.backgrounds || []; setBackdrop(savedBackdrop === 'none' ? null : savedBackdrop || 'dashboard', false);
+}).catch(() => {});
+
 // ---------------------------------------------------------------- the stage's tools
 // Pause: the hero, his effects and his clock stand still; he still turns.
 function renderPause() { const b = $('[data-pause]'); b.replaceChildren(viewer.paused ? '▶' : '❚❚', el('span', { className: 'word', textContent: viewer.paused ? t().play : t().pause })); b.setAttribute('aria-pressed', viewer.paused); }
@@ -417,7 +449,10 @@ const fileName = (ext) => `${state.current?.id || 'hero'}-loadout.${ext}`;
 const download = (blob, name) => { const a = el('a', { href: URL.createObjectURL(blob), download: name }); a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 5000); };
 const flat = document.createElement('canvas'), flatten = () => {
   if (flat.width !== canvas.width || flat.height !== canvas.height) { flat.width = canvas.width; flat.height = canvas.height; }
-  const x = flat.getContext('2d'); x.fillStyle = '#000'; x.fillRect(0, 0, flat.width, flat.height); x.drawImage(canvas, 0, 0);
+  const x = flat.getContext('2d'); x.fillStyle = '#000'; x.fillRect(0, 0, flat.width, flat.height);
+  // The backdrop as the stage shows it: covering, its floor at the pedestal's.
+  const img = backdrop.image; if (img?.complete && img.naturalWidth) { const [sx, sy, sw, sh] = cover(img, flat.width, flat.height, backdrop.current?.floor); x.drawImage(img, sx, sy, sw, sh, 0, 0, flat.width, flat.height); }
+  x.drawImage(canvas, 0, 0);
 };
 $('[data-save-frame]').onclick = () => {
   const once = () => { afterFrame.delete(once); flatten(); flat.toBlob((b) => { if (b) { download(b, fileName('png')); toast(t().saved); } }, 'image/png'); };
@@ -486,20 +521,17 @@ window.addEventListener('hashchange', () => {
 const dialog = $('[data-embed-dialog]');
 $('[data-embed]').onclick = () => {
   const id = state.current?.id || 'nevermore';
-  $('[data-embed-code]').textContent = `<canvas id="hero" style="width: 640px; height: 720px"></canvas>
-<script type="importmap">
+  // The element, dressed as the hero is now (the address keeps the outfit).
+  $('[data-embed-code]').textContent = `<script type="importmap">
 { "imports": {
   "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js",
   "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/",
-  "dota-loadout": "./dota-loadout/src/index.js"
+  "dota-loadout/element": "https://cdn.jsdelivr.net/gh/justkiddingxd/dota-loadout@main/src/element.js"
 } }
 </script>
-<script type="module">
-  import { HeroViewer } from 'dota-loadout';
-  const viewer = new HeroViewer(document.getElementById('hero'));
-  await viewer.load('./heroes/${id}/');
-  viewer.play('${state.current?.animations.find((a) => !a.loop)?.name || 'loadout'}');
-</script>`;
+<script type="module">import 'dota-loadout/element';</script>
+
+<dota-hero loadout="${location.hash || `#${id}`}" style="width: 480px; height: 640px"></dota-hero>`;
   dialog.showModal();
 };
 $('[data-copy]').onclick = async () => {

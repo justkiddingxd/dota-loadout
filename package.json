@@ -1,7 +1,7 @@
 {
   "name": "dota-loadout",
   "version": "0.1.0",
-  "description": "Loadout: every Dota 2 hero live in the browser with three.js — the game's hero shader, loadout light, animations and particle effects",
+  "description": "Every Dota 2 hero live in the browser with three.js, in any of the game's items: the game's hero shader, loadout light, animations and particle effects",
   "homepage": "https://loadout.nyan.cafe/",
   "repository": {
     "type": "git",
@@ -10,29 +10,44 @@
   "bugs": {
     "url": "https://github.com/justkiddingxd/dota-loadout/issues"
   },
+  "license": "MIT",
   "type": "module",
   "main": "src/index.js",
+  "types": "src/index.d.ts",
   "exports": {
-    ".": "./src/index.js"
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.js"
+    },
+    "./element": "./src/element.js",
+    "./package.json": "./package.json"
   },
   "files": [
-    "src"
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "sideEffects": [
+    "./src/element.js"
   ],
   "scripts": {
     "dev": "vite site",
     "build": "vite build site",
     "heroes": "node tools/build-heroes.mjs",
-    "check": "node --check src/index.js && node --check src/viewer.js && node --check src/fx.js && node --check src/material.js && node --check tools/build-heroes.mjs && node --check tools/lib/hero.mjs && node --check tools/lib/game.mjs"
+    "check": "node --check src/index.js && node --check src/viewer.js && node --check src/fx.js && node --check src/material.js && node --check src/loadout.js && node --check src/element.js && node --check src/bloom.js && node --check tools/build-heroes.mjs && node --check tools/lib/hero.mjs && node --check tools/lib/game.mjs"
   },
   "keywords": [
     "dota2",
+    "dota",
     "three.js",
+    "three",
     "webgl",
     "source2",
     "hero",
-    "model-viewer"
+    "model-viewer",
+    "cosmetics",
+    "web-component"
   ],
-  "license": "MIT",
   "peerDependencies": {
     "three": ">=0.180.0"
   },

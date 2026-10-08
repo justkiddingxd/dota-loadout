@@ -12,6 +12,8 @@ import { heroMaterial } from './material.js';
 // Tone mapping: each channel stays as it is up to the knee and rolls off softly toward 1 above it,
 // so bright fire goes yellow and white like in the game, without the hard edge of clipping.
 const KNEE = 0.75;
+// The heroes and items of loadout.nyan.cafe, for ids without a folder of one's own (options.assets).
+export const DEFAULT_ASSETS = 'https://loadout.nyan.cafe/';
 // Bloom: how much of the halo of what is brighter than white is added (options.bloom; false for none).
 const BLOOM = 0.35;
 // Light of the loadout page when a hero has no portrait of his own.
@@ -33,9 +35,12 @@ export class HeroViewer {
   // goes on to the page) or false; wheel — 'zoom', 'turn' or false; framing — 'hero' (the hero,
   // with what fits of the pedestal) or 'full' (hero and pedestal whole); pixelRatio; textureScale (1, or
   // 0.5 by default on phones and machines of 4 GB or less); bloom (its strength, 0.35, or false);
+  // assets (where load('pudge') and wear('weapon', 6058) find them: loadout.nyan.cafe by default);
   // onProgress(loaded, total); onAnimation(name). Set paused to stand the hero and his effects still.
   constructor(canvas, options = {}) {
     this.canvas = canvas; this.options = { controls: true, wheel: 'zoom', framing: 'hero', ...options };
+    // Where heroes and items are found by id (load('pudge'), wear('weapon', 6058)): the site's own.
+    this.assets = this.options.assets ?? DEFAULT_ASSETS;
     // Phones and small machines get textures at half size: a quarter of the memory, unseen on their screens.
     const small = globalThis.matchMedia?.('(pointer: coarse)').matches || (globalThis.navigator?.deviceMemory && navigator.deviceMemory <= 4);
     this.textureScale = this.options.textureScale ?? (small ? 0.5 : 1);
@@ -83,9 +88,11 @@ void main() {
     renderer.setAnimationLoop(() => this.frame());
   }
 
-  // A hero folder's address (with hero.json inside), or { manifest, url(path) } for bundlers.
+  // A hero: his id (from options.assets), a hero folder's address (with hero.json inside), or
+  // { manifest, url(path) } for bundlers.
   async load(source) {
     const ticket = ++this.loading;
+    if (typeof source === 'string' && /^[a-z_0-9]+$/.test(source)) source = new URL(`heroes/${source}/`, this.assets).href;
     const { manifest, url } = typeof source === 'string' ? await fetchHero(source) : source;
     if (ticket !== this.loading) return null;
     const manager = new THREE.LoadingManager(); manager.onProgress = (_, loaded, total) => this.options.onProgress?.(loaded, total);
@@ -106,6 +113,7 @@ void main() {
   // bundlers, on one of his slots in one of its styles; null puts the slot's default back.
   async wear(slot, source, style = 0) {
     const hero = this.hero; if (!hero) return;
+    if (typeof source === 'number' || (typeof source === 'string' && /^\d+$/.test(source))) source = new URL(`items/${source}/`, this.assets).href;
     const tickets = (this.wearing ||= {}), ticket = (tickets[slot] = (tickets[slot] || 0) + 1);
     const current = () => hero === this.hero && ticket === tickets[slot];
     const item = typeof source === 'string' ? await fetchJson(source, 'item.json') : source;
