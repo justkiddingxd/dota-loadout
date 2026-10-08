@@ -100,7 +100,7 @@ class Particle {
     this.age = 0; this.life = c.life; this.alpha = c.alpha; this.alpha2 = 1; this.color = c.color.clone(); this.radius = c.radius; this.trail = 0.1;
     this.rot = new THREE.Vector3(0, 0, c.roll); this.rotSpeed = new THREE.Vector3(0, 0, c.rollSpeed); this.normal = new THREE.Vector3(0, 0, 1);
     this.seq = c.seq; this.seq2 = 0; this.created = 0; this.forceScale = 1; this.s = [0, 0, 0]; this.sv = new THREE.Vector3(); this.sv2 = new THREE.Vector3(); this.hbo = new THREE.Vector3();
-    this.id = 0; this.uid = 0; this.index = 0; this.dead = false; this.initial = null; this.bone = null; this.surface = null; this.snap = -1; this.orient = null;
+    this.id = 0; this.uid = 0; this.index = 0; this.dead = false; this.initial = null; this.bone = null; this.surface = null; this.snap = -1; this.snapFrom = null; this.orient = null;
   }
   get nage() { return this.age / Math.max(1e-4, this.life); }
   getS(f) {
@@ -350,13 +350,13 @@ const INIT = {
   // Snapshots: points on the model with their bones (.vsnap), skinned by the hero's skeleton.
   C_INIT_InitSkinnedPositionFromCPSnapshot(d) {
     const cp = d.m_nSnapshotControlPointNumber ?? 0, random = d.m_bRandom === true;
-    return (p, s) => { const snap = s.snapshot(cp); if (!snap) return; const i = random ? Math.floor(rnd() * snap.count) : p.uid % snap.count; p.snap = i; p.pos.copy(snap.point(i)); p.prev.copy(p.pos); };
+    return (p, s) => { const snap = s.snapshot(cp); if (!snap) return; const i = random ? Math.floor(rnd() * snap.count) : p.uid % snap.count; p.snap = i; p.snapFrom = snap; p.pos.copy(snap.point(i)); p.prev.copy(p.pos); };
   },
   // Skinned snapshots follow the hero's bones; rigid ones (no bone weights, e.g. the Desolation
   // blades) hold points in the space of the snapshot's control point, which here is the arm.
   C_INIT_InitFromCPSnapshot(d) {
     const cp = d.m_nControlPointNumber ?? 0, random = d.m_bRandom, attr = field(d.m_nAttributeToRead, F.Position);
-    return (p, s) => { const snap = s.snapshot(cp); if (!snap || attr !== F.Position) return; const i = random ? Math.floor(rnd() * snap.count) : p.uid % snap.count; p.snap = i;
+    return (p, s) => { const snap = s.snapshot(cp); if (!snap || attr !== F.Position) return; const i = random ? Math.floor(rnd() * snap.count) : p.uid % snap.count; p.snap = i; p.snapFrom = snap;
       p.pos.copy(snap.point(i, s.cp(cp).matrix())); p.prev.copy(p.pos); if (snap.data.bone && s.model) p.bone = s.model.bone(snap.boneName()); };
   },
   C_INIT_CreateOnModel(d) {
@@ -745,11 +745,12 @@ const OP = {
   // Model-bound: particles ride the bones they were created on or the snapshot points they came from.
   C_OP_SnapshotSkinToBones(d) {
     const f0 = d.m_flLifeTimeFadeStart ?? 0, f1 = d.m_flLifeTimeFadeEnd ?? 0, cp = d.m_nControlPointNumber ?? 0;
+    // A particle keeps to the snapshot it was born from (a parent's on its control point, maybe).
     return (ps, dt, s) => { const snap = s.snapshot(cp);
       // Without a snapshot, those born on an item's surface keep to their point of it.
-      if (!snap) { for (const p of ps) { if (!p.surface) continue; const k = f1 > f0 ? 1 - saturate(remap(p.nage, f0, f1)) : 1; if (k <= 0) continue; const delta = p.surface().clone().sub(p.pos).multiplyScalar(k); p.pos.add(delta); p.prev.add(delta); } return; }
+      if (!snap && !ps.some((p) => p.snapFrom)) { for (const p of ps) { if (!p.surface) continue; const k = f1 > f0 ? 1 - saturate(remap(p.nage, f0, f1)) : 1; if (k <= 0) continue; const delta = p.surface().clone().sub(p.pos).multiplyScalar(k); p.pos.add(delta); p.prev.add(delta); } return; }
       for (const p of ps) { if (p.snap < 0) continue; const k = f1 > f0 ? 1 - saturate(remap(p.nage, f0, f1)) : 1; if (k <= 0) continue;
-      const target = snap.point(p.snap); const delta = target.sub(p.pos).multiplyScalar(k); p.pos.add(delta); p.prev.add(delta); } };
+      const target = (p.snapFrom || snap).point(p.snap); const delta = target.sub(p.pos).multiplyScalar(k); p.pos.add(delta); p.prev.add(delta); } };
   },
   C_OP_SnapshotRigidSkinToBones(d) { return OP.C_OP_SnapshotSkinToBones(d); },
   C_OP_LockToBone(d) {
@@ -1333,7 +1334,10 @@ class State {
   setCP(i, pos) { const c = this.own.get(i) || new ControlPoint(); c.pos.copy(pos); this.own.set(i, c); }
   setCPRotation(i, q) { const c = this.own.get(i) || Object.assign(new ControlPoint(), { pos: this.cp(i).pos.clone() }); c.quat.copy(q); this.own.set(i, c); }
   override(i, pos, quat) { const c = this.own.get(i) || new ControlPoint(); c.pos.copy(pos); if (quat) c.quat.copy(quat); this.own.set(i, c); }
-  snapshot(cp) { return this.sim.snapshot || this.parent?.snapshot(cp) || null; }
+  // The snapshot on a control point: a parent's on it goes before the system's own (Scythes of
+  // Sorrow's right edge puts edge_r on CP 6 over its child's edge_l, the left one), then any.
+  snapshot(cp) { return this.parent?.snapshotOn(cp) || this.snapshotOn(cp) || this.sim.snapshot || this.parent?.snapshot(cp) || null; }
+  snapshotOn(cp) { return this.parent?.snapshotOn(cp) || (this.sim.snapshot && this.sim.snapshotCP === cp ? this.sim.snapshot : null); }
 }
 
 export class Simulation {
@@ -1366,7 +1370,7 @@ export class Simulation {
     this.passes = this.constraints.length ? Math.max(1, ...(def.m_Operators || []).filter((o) => o._class === 'C_OP_BasicMovement' && !o.m_bDisableOperator).map((o) => o.m_nMaxConstraintPasses ?? 3)) : 1;
     // A renderer has a strength too: at 0 it draws nothing (Ravenblight's CP 2 picks its feathers' material).
     this.renderers = (def.m_Renderers || []).filter((r) => !r.m_bDisableOperator).map((r) => { const x = lib.renderer(r, this); if (x) x.colorScale = colorScale(r); if (x && r.m_flOpStrength !== undefined) x.strength = strength(r); return x; }).filter(Boolean);
-    this.snapshot = def.m_hSnapshot ? lib.snapshot(def.m_hSnapshot) : null; if (this.snapshot) this.snapshot.sim = this;
+    this.snapshot = def.m_hSnapshot ? lib.snapshot(def.m_hSnapshot) : null; if (this.snapshot) this.snapshot.sim = this; this.snapshotCP = def.m_nSnapshotControlPoint ?? 0;
     for (const c of def.m_Children || []) {
       if (c.m_bEndCap || c.m_bDisableChild) continue;
       const cd = lib.system(c.m_ChildRef); if (!cd) continue;
