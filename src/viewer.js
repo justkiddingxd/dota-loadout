@@ -260,7 +260,14 @@ async function buildHero(manifest, url, manager, time, light, textureScale = 1) 
     scene.traverse((o) => { if (o.isSkinnedMesh) skinned.push(o); else if (o.isMesh) rigid.push(o); });
     for (const mesh of skinned) {
       const mapped = mesh.skeleton.bones.map((b, i) => { const own = bones[b.name.toLowerCase()]; if (own) return own; const parent = b.parent && bones[b.parent.name.toLowerCase()];
-        if (parent && !extra.some((x) => x.bone === b)) extra.push({ bone: b, parent, key: b.name.toLowerCase(), inverse: mesh.skeleton.boneInverses[i] }); return b; });
+        if (parent && !extra.some((x) => x.bone === b)) {
+          // Where it hangs under the hero's bone, from the two bind poses: its own place under its
+          // parent in the item's file may be under a stand-in of that bone at the origin (Tinker's
+          // Arcanic Resonance Beam: its cannon's bones 4 m off, under the floor).
+          const heroInverse = inverses[parent.name.toLowerCase()], local = heroInverse && heroInverse.clone().multiply(mesh.skeleton.boneInverses[i].clone().invert());
+          extra.push({ bone: b, parent, key: b.name.toLowerCase(), inverse: mesh.skeleton.boneInverses[i], local });
+        }
+        return b; });
       mesh.skeleton.bones.forEach((b, i) => { const k = b.name.toLowerCase(); inverses[k] ||= mesh.skeleton.boneInverses[i]; bones[k] ||= mapped[i]; });
       mesh.bind(new THREE.Skeleton(mapped, mesh.skeleton.boneInverses), mesh.bindMatrix);
     }
@@ -268,7 +275,7 @@ async function buildHero(manifest, url, manager, time, light, textureScale = 1) 
     return { meshes: [...skinned, ...rigid], extra };
   };
   // A companion (a pet, a summoned unit's look) stands beside the hero on the turntable.
-  const putOn = (w) => { for (const x of w.extra) { x.parent.add(x.bone); bones[x.key] = x.bone; inverses[x.key] = x.inverse; } for (const m of w.meshes) root.add(m); if (w.companion) turntable.add(w.companion.group); };
+  const putOn = (w) => { for (const x of w.extra) { x.parent.add(x.bone); if (x.local) x.local.decompose(x.bone.position, x.bone.quaternion, x.bone.scale); bones[x.key] = x.bone; inverses[x.key] = x.inverse; } for (const m of w.meshes) root.add(m); if (w.companion) turntable.add(w.companion.group); };
   const takeOff = (w) => { if (w.companion) w.companion.group.removeFromParent(); for (const m of w.meshes) root.remove(m); for (const x of w.extra) { x.bone.parent?.remove(x.bone); if (bones[x.key] === x.bone) delete bones[x.key]; if (inverses[x.key] === x.inverse) delete inverses[x.key]; } };
   const items = names.filter((k) => k !== 'hero' && k !== 'pedestal'), defaults = new Map(), worn = new Map(), wearing = new Map();
   const heroMeshes = []; root.traverse((o) => { if (o.isMesh) heroMeshes.push(o); });
