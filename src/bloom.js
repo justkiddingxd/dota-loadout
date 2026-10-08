@@ -6,7 +6,9 @@ import * as THREE from 'three';
 const VERTEX = 'varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }';
 // What glows: each pixel's colour past the threshold, eased in over a knee (no hard edge).
 const BRIGHT = `uniform sampler2D tIn; uniform vec2 uTexel; uniform float uThreshold; varying vec2 vUv;
-vec3 bright(vec2 uv) { vec3 c = texture2D(tIn, uv).rgb; float l = max(c.r, max(c.g, c.b)), k = clamp(l - uThreshold + 0.5, 0.0, 1.0);
+vec3 bright(vec2 uv) { vec3 c = texture2D(tIn, uv).rgb;
+  // A stray pixel of no number or no end (a material's 0/0) would spread over the whole halo.
+  if (any(isnan(c)) || any(isinf(c))) return vec3(0.0); c = min(c, vec3(64.0)); float l = max(c.r, max(c.g, c.b)), k = clamp(l - uThreshold + 0.5, 0.0, 1.0);
   float w = max(l - uThreshold, 0.0) + k * k * 0.5; return c * w / max(l, 1e-4); }
 void main() { vec2 d = uTexel * 0.5;
   gl_FragColor = vec4((bright(vUv) * 4.0 + bright(vUv + vec2(-d.x, -d.y)) + bright(vUv + vec2(d.x, -d.y)) + bright(vUv + vec2(-d.x, d.y)) + bright(vUv + d)) / 8.0, 1.0); }`;
