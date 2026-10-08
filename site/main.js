@@ -526,7 +526,7 @@ $('[data-embed]').onclick = () => {
 { "imports": {
   "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js",
   "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/",
-  "dota-loadout/element": "https://cdn.jsdelivr.net/gh/justkiddingxd/dota-loadout@main/src/element.js"
+  "dota-loadout/element": "https://cdn.jsdelivr.net/npm/dota-loadout@0.1/src/element.js"
 } }
 </script>
 <script type="module">import 'dota-loadout/element';</script>

@@ -56,7 +56,7 @@ look.address;                                              // '#terrorblade/hero
 ```
 
 Without a bundler, an import map: `"three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js"`,
-`"three/addons/": "…/examples/jsm/"`, `"dota-loadout": "https://cdn.jsdelivr.net/npm/dota-loadout/src/index.js"`.
+`"three/addons/": "…/examples/jsm/"`, `"dota-loadout": "https://cdn.jsdelivr.net/npm/dota-loadout@0.1/src/index.js"`.
 Types are included (`src/index.d.ts`). To serve the heroes yourself, copy `assets/` (or build it with the
 pipeline) and pass `assets: 'https://your.host/'`.
 
