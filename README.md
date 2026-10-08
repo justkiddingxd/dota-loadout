@@ -106,10 +106,15 @@ echo <login> > username.txt
 node tools/fetch-dota.mjs
 npm run heroes -- --game .cache/steam/game/dota
 node tools/build-items.mjs --game .cache/steam/game/dota --cli .cache/vrf-20.0/Source2Viewer-CLI --only marci,juggernaut,pudge
+# after a patch: what is new (items, arcanas, personas, heroes) fetched, built and deployed
+node tools/update.mjs
 ```
 
-A worn item can take a prismatic gem when its effects read one, as in the game (`viewer.gem(slot, '#rrggbb')`;
-the catalog marks them `prismatic`), and an unusual effect when it can roll one: the effects of its
+The server runs `tools/update.mjs` daily (`loadout-update.timer`, logs in `journalctl -u loadout-update`);
+when Steam asks for the password again, the run stops there until the login above is repeated by hand.
+
+An item with a prismatic socket in the game (Terrorblade's and Techies' arcanas) takes a gem
+(`viewer.gem(slot, '#rrggbb')`; the catalog marks it `prismatic` with the gem it comes with), and an unusual effect when it can roll one: the effects of its
 season's list, Crownfall, Frostivus or New Bloom (`viewer.unusual(slot, 836)`; the catalog lists them
 under `unusual`). The site keeps both in the address: `#nevermore/arms=29087~creators_light!837`.
 
@@ -145,4 +150,5 @@ Loadout — все герои Dota 2 в браузере на three.js: игро
 частицы. Код открыт под MIT, ассеты принадлежат Valve. Демо: https://loadout.nyan.cafe/. Пересобрать героев
 после патча: `tools/extract-dota.cmd` на Windows с установленной Dota, затем
 `npm run heroes -- --zip <архив>`. Косметика: `node tools/fetch-dota.mjs` качает файлы игры из Steam,
-`node tools/build-items.mjs` собирает предметы (подробности выше, в Cosmetics).
+`node tools/build-items.mjs` собирает предметы, `node tools/update.mjs` после патча берёт новое и выкладывает
+(на сервере раз в сутки, `loadout-update.timer`; подробности выше, в Cosmetics).
