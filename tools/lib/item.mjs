@@ -21,6 +21,9 @@ export async function buildItem({ game, cli, item, heroBones, out, temp, log = (
 
   // Every model any style wears, once.
   const paths = [...new Set(item.styles.flatMap((s) => s.models))].filter(has), MODELS = Object.fromEntries(paths.map((p, i) => [`w${i}`, p]));
+  // The models it refits other items into (an invisible box only hides them: no model).
+  const refits = [...new Set(item.styles.flatMap((s) => (s.refitTo || []).map((r) => r.model)))].filter((p) => !/invisiblebox/.test(p) && has(p));
+  for (const [i, p] of refits.entries()) MODELS[`r${i}`] = p;
   // Companions (pets, summoned units' looks) stand on their own: their skeleton, and the clip they
   // idle in (loadout, else idle, else the first).
   const companions = [...new Set(item.styles.map((s) => s.companion?.model).filter(Boolean))].filter(has), clipOf = {};
@@ -59,10 +62,11 @@ export async function buildItem({ game, cli, item, heroBones, out, temp, log = (
       models: s.models.map((p) => nameOf[p]).filter((n) => modelFiles[n]),
       effects: s.effects.filter((e) => systems[e]), particles: Object.fromEntries(Object.entries(s.particles).filter(([, to]) => systems[to])),
       snapshots: Object.fromEntries(Object.entries(s.snapshots).filter(([, to]) => bundle.snapshots[to])),
+      ...((s.refitTo || []).length ? { refits: s.refitTo.map((r) => ({ item: r.item, style: r.style, model: /invisiblebox/.test(r.model) ? null : nameOf[r.model] })).filter((r) => r.model === null || modelFiles[r.model]) } : {}),
     })),
   };
   writeFileSync(join(out, 'item.json'), JSON.stringify(manifest));
   await compressHeroModels(join(out, 'models'));
   rmSync(temp, { recursive: true, force: true });
-  return { models: Object.keys(modelFiles).length, systems: Object.keys(systems).length, icons: Object.keys(icons).length, worn: manifest.styles.some((s) => s.models.length || s.effects.length || s.activities.length || s.form || s.companion) };
+  return { models: Object.keys(modelFiles).length, systems: Object.keys(systems).length, icons: Object.keys(icons).length, worn: manifest.styles.some((s) => s.models.length || s.effects.length || s.activities.length || s.form || s.companion || s.refits?.length) };
 }

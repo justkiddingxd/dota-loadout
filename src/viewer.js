@@ -279,6 +279,20 @@ async function buildHero(manifest, url, manager, time, light, textureScale = 1) 
     // Unskinned items stay as they are, beside the hero.
     return { meshes: [...skinned, ...rigid], extra };
   };
+  // Refits: an item worn with another it refits (an arcana with a set's armor) puts its own model of
+  // that item in place of the item's (or none, for an invisible box). Undone and done again whenever
+  // what is worn changes.
+  const refitted = [];
+  const refit = () => {
+    const now = new Set(worn.values());
+    for (const { w, r } of refitted.splice(0)) { if (now.has(w)) for (const m of w.meshes) root.add(m); if (r.fitted) { for (const m of r.fitted.meshes) root.remove(m); for (const x of r.fitted.extra) x.bone.parent?.remove(x.bone); } }
+    for (const [, a] of worn) for (const r of a.refits || []) for (const [, w] of worn) {
+      if (w === a || w.item !== r.item || (r.style != null && w.styleIndex !== r.style)) continue;
+      for (const m of w.meshes) root.remove(m);
+      if (r.scene) { r.fitted ||= fit(r.scene); putOn({ meshes: r.fitted.meshes, extra: r.fitted.extra }); }
+      refitted.push({ w, r });
+    }
+  };
   // A companion (a pet, a summoned unit's look) stands beside the hero on the turntable.
   const putOn = (w) => { for (const x of w.extra) { x.parent.add(x.bone); if (x.local) x.local.decompose(x.bone.position, x.bone.quaternion, x.bone.scale); bones[x.key] = x.bone; inverses[x.key] = x.inverse; } for (const m of w.meshes) root.add(m); if (w.companion) turntable.add(w.companion.group); };
   const takeOff = (w) => { if (w.companion) w.companion.group.removeFromParent(); for (const m of w.meshes) root.remove(m); for (const x of w.extra) { x.bone.parent?.remove(x.bone); if (bones[x.key] === x.bone) delete bones[x.key]; if (inverses[x.key] === x.inverse) delete inverses[x.key]; } };
@@ -588,7 +602,12 @@ async function buildHero(manifest, url, manager, time, light, textureScale = 1) 
             const clip = gltf.animations.find((x) => x.name === c.clip) || gltf.animations[0]; if (clip) mixer.clipAction(clip).play();
             companion = { group, mixer };
           }
-          record = { scenes, companion, attachments: Object.assign({}, ...s.models.map((n) => m.attachments?.[n] || {})) };
+          // The models it refits other items into, ready for when one of them is worn too.
+          const refits = await Promise.all((s.refits || []).map(async (r) => {
+            if (!r.model) return { ...r, scene: null };
+            const sc = (await loader.loadAsync(source.url(m.models[r.model]))).scene; dress(sc, m.materials, tex, source.url(''), itemCube); return { ...r, scene: sc };
+          }));
+          record = { scenes, companion, refits, attachments: Object.assign({}, ...s.models.map((n) => m.attachments?.[n] || {})) };
           wearing.set(key, record);
         }
       }
@@ -597,9 +616,9 @@ async function buildHero(manifest, url, manager, time, light, textureScale = 1) 
       const old = worn.get(slot); if (old) takeOff(old);
       if (record.scenes && !record.meshes) { record.meshes = []; record.extra = []; for (const sc of record.scenes) { const w = fit(sc.scene); record.meshes.push(...w.meshes); record.extra.push(...w.extra); } }
       putOn(record);
-      worn.set(slot, { meshes: record.meshes, extra: record.extra, companion: record.companion, item: m ? m.id : null, style: s, styleIndex: m ? m.styles.indexOf(s) : 0, unusual: m?.unusual || null });
+      worn.set(slot, { meshes: record.meshes, extra: record.extra, companion: record.companion, refits: record.refits || [], item: m ? m.id : null, style: s, styleIndex: m ? m.styles.indexOf(s) : 0, unusual: m?.unusual || null });
       attachments[slot] = m ? record.attachments : manifest.attachments?.[slot];
-      ambient(); remodify(); reskin(); gemTint();
+      refit(); ambient(); remodify(); reskin(); gemTint();
     },
     dispose() {
       mixer.stopAllAction(); for (const p of props) p.mixer.stopAllAction(); turntable.traverse((o) => { o.geometry?.dispose(); });

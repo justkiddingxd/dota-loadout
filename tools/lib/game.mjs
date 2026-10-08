@@ -291,6 +291,9 @@ export function loadCosmetics(game) {
         name: s === null ? null : text(style.name), icon: icon ? icon.toLowerCase() : null,
         models: [model, ...mine.filter((m) => m.type === 'additional_wearable').map((m) => m.asset)].filter((m) => m && /\.vmdl$/.test(m)),
         effects: mine.filter((m) => m.type === 'particle_create' && /\.vpcf$/.test(m.modifier || '')).map((m) => m.modifier.replace(/\.vpcf$/, '')),
+        // Models of other items it refits while both are worn (an arcana's: Terrorblade's puts the
+        // Rictus Ripper armor in its arcana style, Zeus's hides his vest): their model, its own.
+        refits: Object.fromEntries(mine.filter((m) => m.type === 'model' && /\.vmdl$/.test(m.asset || '') && /\.vmdl$/.test(m.modifier || '')).map((m) => [m.asset.toLowerCase(), m.modifier.toLowerCase()])),
         particles: pairs('particle'), snapshots: Object.fromEntries(mine.filter((m) => m.type === 'particle_snapshot' && m.asset && m.modifier).map((m) => [m.asset, m.modifier])),
         skin: +(style.skin ?? mine.find((m) => m.type === 'model_skin')?.skin ?? 0),
         activities: mine.filter((m) => m.type === 'activity' && m.modifier).map((m) => [m.asset || 'ALL', m.modifier]),

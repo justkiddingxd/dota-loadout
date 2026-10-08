@@ -36,6 +36,10 @@ for (const hero of list) {
   // Styles that change the hero's model name his form by its key (a form built with him, or none).
   for (const i of items) for (const s of i.styles) if (s.form && typeof s.form === 'object') s.form = hero.forms?.find((f) => f.model === s.form.model)?.key || null;
   for (const i of items) for (const s of i.styles) if (s.form && !existsSync(join(heroDir, 'forms', s.form, 'hero.json'))) s.form = null;
+  // Refits: the item and style each refitted model is worn by (any of the hero's, defaults too).
+  const wornBy = new Map();
+  for (const i of c.items) i.styles.forEach((s, k) => { for (const p of s.models) (wornBy.get(p.toLowerCase()) || wornBy.set(p.toLowerCase(), []).get(p.toLowerCase())).push({ item: i.id, style: i.styles.length > 1 ? k : null }); });
+  for (const i of items) for (const s of i.styles) s.refitTo = Object.entries(s.refits || {}).flatMap(([from, to]) => (wornBy.get(from) || []).filter((t) => t.item !== i.id).map((t) => ({ ...t, model: to })));
   console.log(`${hero.name.en}: ${items.length} items of ${c.items.length}`);
   const built = {}, started = Date.now(); let next = 0, done = 0;
   const worker = async () => {

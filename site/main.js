@@ -150,8 +150,9 @@ async function open(id) {
     // The catalog first: what the address has him wear may be another form of him (a persona, an arcana).
     state.catalog = await fetch(`heroes/${h.id}/items.json`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
     if (ticket !== loads) return;
-    const asked = parseHash(); state.worn = valid(asked.worn); state.gems = Object.fromEntries(Object.entries(asked.gems).filter(([slot]) => state.worn[slot]));
-    state.unusual = Object.fromEntries(Object.entries(asked.unusual).filter(([slot]) => state.worn[slot]));
+    const asked = parseHash(); state.worn = valid(asked.worn);
+    state.gems = Object.fromEntries(Object.entries(asked.gems).map(([slot, g]) => [slotNow(asked.worn, slot), g]).filter(([slot]) => state.worn[slot]));
+    state.unusual = Object.fromEntries(Object.entries(asked.unusual).map(([slot, u]) => [slotNow(asked.worn, slot), u]).filter(([slot]) => state.worn[slot]));
     await reload(ticket);
   } catch (e) {
     if (ticket !== loads) return;
@@ -214,7 +215,21 @@ const formOf = (worn) => {
 };
 const applies = (slot) => { const s = state.catalog?.slots.find((x) => x.name === slot), p = personaOf(state.worn); return !!s && (s.persona ? s.persona === p : !p || slot === 'persona_selector'); };
 // What the address names that the catalog has (defaults are the hero's own: nothing to keep).
-const valid = (worn) => Object.fromEntries(Object.entries(worn).filter(([slot, [id]]) => { const it = state.catalog?.items[id]; return it && !it.default && it.slot === slot; }));
+// An item the game has since moved to another slot goes there (Terrorblade's arcana, once his head,
+// now his base: head=5957 in old links).
+// now his base: head=5957 in old links); its set's item for the slot it left takes that slot (the
+// arcana's horns), as the game split it.
+const valid = (worn) => {
+  const c = state.catalog, out = {};
+  for (const [slot, w] of Object.entries(worn)) { const it = c?.items[w[0]]; if (it && !it.default) out[it.slot] = w; }
+  for (const [slot, w] of Object.entries(worn)) {
+    const it = c?.items[w[0]]; if (!it || it.default || it.slot === slot || out[slot] || !it.set) continue;
+    const mate = Object.entries(c.items).find(([, x]) => x.set === it.set && x.slot === slot && !x.default); if (mate) out[slot] = [+mate[0], 0];
+  }
+  return out;
+};
+// The slot an address's slot means now (the item it names may have moved).
+const slotNow = (asked, slot) => { const it = state.catalog?.items[asked[slot]?.[0]]; return it?.slot || slot; };
 
 // Prismatic gems: the palette (gems.json), and the gem in each slot's item while it takes one.
 const gemHex = (key) => state.palette.find((g) => g.key === key)?.hex || null;
@@ -444,7 +459,8 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'ArrowRight') viewer.rotate(0.6, { relative: true });
 });
 window.addEventListener('hashchange', () => {
-  const { id, worn, gems, unusual } = parseHash(); if (id !== state.current?.id) return open(id);
+  const { id, worn, gems: g0, unusual: u0 } = parseHash(); if (id !== state.current?.id) return open(id);
+  const moved = (o) => Object.fromEntries(Object.entries(o).map(([slot, v]) => [slotNow(worn, slot), v])), gems = moved(g0), unusual = moved(u0);
   dress(worn);
   // The gems it names, in the items it names (those still loading take theirs when they are on).
   for (const slot of new Set([...Object.keys(state.gems), ...Object.keys(gems)])) { if (gems[slot] && state.worn[slot]) state.gems[slot] = gems[slot]; else delete state.gems[slot]; viewer.gem(slot, gemHex(gemOf(slot))); }
