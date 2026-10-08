@@ -261,10 +261,15 @@ async function buildHero(manifest, url, manager, time, light, textureScale = 1) 
     for (const mesh of skinned) {
       const mapped = mesh.skeleton.bones.map((b, i) => { const own = bones[b.name.toLowerCase()]; if (own) return own; const parent = b.parent && bones[b.parent.name.toLowerCase()];
         if (parent && !extra.some((x) => x.bone === b)) {
-          // Where it hangs under the hero's bone, from the two bind poses: its own place under its
-          // parent in the item's file may be under a stand-in of that bone at the origin (Tinker's
-          // Arcanic Resonance Beam: its cannon's bones 4 m off, under the floor).
-          const heroInverse = inverses[parent.name.toLowerCase()], local = heroInverse && heroInverse.clone().multiply(mesh.skeleton.boneInverses[i].clone().invert());
+          // Where it hangs under the hero's bone, from the bind poses of the two: the item's own of
+          // that bone (its weapon's bone, Pugna's sceptre, bound otherwise than his default one's),
+          // unless the item has only a stand-in of it at the origin (Tinker's Arcanic Resonance Beam:
+          // its cannon's bones 4 m off, under the floor), then the hero's.
+          const key = parent.name.toLowerCase(), j = mesh.skeleton.bones.findIndex((x) => x.name.toLowerCase() === key);
+          const at = (m) => new THREE.Vector3().setFromMatrixPosition(m.clone().invert());
+          const own = j >= 0 ? mesh.skeleton.boneInverses[j] : null, hero = inverses[key];
+          const parentInverse = own && (!hero || at(own).distanceTo(at(hero)) < 0.5) ? own : hero;
+          const local = parentInverse ? parentInverse.clone().multiply(mesh.skeleton.boneInverses[i].clone().invert()) : null;
           extra.push({ bone: b, parent, key: b.name.toLowerCase(), inverse: mesh.skeleton.boneInverses[i], local });
         }
         return b; });
