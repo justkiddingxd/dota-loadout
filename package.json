@@ -1,6 +1,6 @@
 {
   "name": "dota-loadout",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Every Dota 2 hero live in the browser with three.js, in any of the game's items: the game's hero shader, loadout light, animations and particle effects",
   "homepage": "https://loadout.nyan.cafe/",
   "repository": {

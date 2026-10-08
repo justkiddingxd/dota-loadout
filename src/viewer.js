@@ -140,12 +140,13 @@ void main() {
   // The hero as an effigy: a statue of gold, frost, jade or stone (null: himself), on that effigy's
   // pedestal (assets' effigies/<stuff>/), without his effects. Pause him to keep his pose.
   async statue(stuff) {
-    const look = stuff && STATUES[stuff], u = this.light; this.effigy = look ? stuff : null;
+    const look = stuff && STATUES[stuff], u = this.light, was = this.effigy; this.effigy = look ? stuff : null;
     u.uStatue.value = look ? 1 : 0;
     if (look) { u.uStatueColor.value.setRGB(...look.color); u.uStatueRim.value.setRGB(...look.rim); u.uStatueMetal.value = look.metal; u.uStatueGloss.value = look.gloss; u.uStatueShine.value = look.shine; }
     const hero = this.hero; if (!hero) return;
+    if (!look && !was) return;
     const source = look ? await fetchJson(new URL(`effigies/${stuff}/`, this.assets).href, 'pedestal.json').catch(() => null) : null;
-    if (hero === this.hero && this.effigy === (look ? stuff : null)) await hero.pedestal(source);
+    if (hero === this.hero && this.effigy === (look ? stuff : null)) { await hero.pedestal(source); this.frameView(); }
   }
   // Effects worn items change that the hero shows only when he acts (his abilities'): [{ slot, from, to }].
   get abilityEffects() { return this.hero?.abilityEffects || []; }
@@ -176,12 +177,13 @@ void main() {
   // the way round the turntable, so that they stay in it as he turns.
   frameView(hero = this.hero) {
     if (!hero) return;
-    const frame = (this.options.framing === 'hero' ? hero.heroBox : hero.box).clone(), r = hero.companionReach();
+    // An effigy shows whole, its pedestal part of it.
+    const byHero = this.options.framing === 'hero' && !this.effigy, frame = (byHero ? hero.heroBox : hero.box).clone(), r = hero.companionReach();
     // Their reach across the view (their depth only moves them nearer or farther).
     if (r) frame.union(new THREE.Box3(new THREE.Vector3(-r.radius, r.min, frame.min.z), new THREE.Vector3(r.radius, r.max, frame.max.z)));
     const fsize = frame.getSize(new THREE.Vector3());
     this.view.center.copy(frame.getCenter(new THREE.Vector3())); this.view.size = fsize;
-    if (this.options.framing === 'hero' && hero.heroBox !== hero.box) { this.view.center.y -= fsize.y * 0.1; this.view.size = fsize.clone().setY(fsize.y * 1.2); }
+    if (byHero && hero.heroBox !== hero.box) { this.view.center.y -= fsize.y * 0.1; this.view.size = fsize.clone().setY(fsize.y * 1.2); }
     this.place();
   }
 
@@ -348,7 +350,7 @@ async function buildHero(manifest, url, manager, time, light, textureScale = 1) 
   const heroMeshes = []; root.traverse((o) => { if (o.isMesh) heroMeshes.push(o); });
   for (const name of items) { const w = fit(loaded[name].scene); defaults.set(name, w); worn.set(name, { ...w, item: null }); putOn(w); }
   const turntable = new THREE.Group(); turntable.add(root); if (loaded.pedestal) turntable.add(loaded.pedestal.scene);
-  let effigy = null;
+  let effigy = null, ownBox = null;
   // Pedestals are not part of a statue.
   const notStatue = (scene) => scene?.traverse((o) => { if (o.material?.userData?.hero) o.material.userData.hero.uStatueSkip.value = 1; });
   const materials = new Map();
@@ -664,6 +666,9 @@ async function buildHero(manifest, url, manager, time, light, textureScale = 1) 
       effigy = next; if (effigy) turntable.add(effigy);
       if (loaded.pedestal) loaded.pedestal.scene.visible = !effigy;
       root.position.y = height;
+      // The view's box: the hero (raised) on the effigy's pedestal, or on his own.
+      ownBox ||= box.clone(); box.copy(ownBox);
+      if (effigy) { turntable.updateMatrixWorld(true); box.copy(heroBox).translate(new THREE.Vector3(0, height, 0)).union(new THREE.Box3().setFromObject(effigy)); }
     },
     // Effects worn items put in place of the hero's that he does not show by himself (no ambient
     // effect, no animation's event): his abilities' mostly. [{ slot, from, to }]
