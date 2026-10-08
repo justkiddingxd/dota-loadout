@@ -11,6 +11,7 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { heroScreens } from './lib/game.mjs';
 import { parseKV } from './lib/kv1.mjs';
 
 const args = process.argv.slice(2), flag = (name) => args.includes(`--${name}`);
@@ -24,7 +25,7 @@ if (!flag('no-fetch')) run('fetch-dota.mjs');
 // The game's heroes and the items for them that the site shows (wearables and defaults).
 const ig = parseKV(readFileSync(join(GAME, 'scripts/items/items_game.txt'), 'utf8')).data.items_game;
 const heroesOf = (item) => Object.keys(item.used_by_heroes || {}).filter((k) => k.startsWith('npc_dota_hero_')).map((k) => k.slice(14));
-const items = Object.entries(ig.items).filter(([, i]) => (i.prefab === 'wearable' || i.prefab === 'default_item') && i.used_by_heroes && typeof i.used_by_heroes === 'object');
+const items = Object.entries(ig.items).filter(([, i]) => (['wearable', 'default_item', 'taunt'].includes(i.prefab) && i.used_by_heroes && typeof i.used_by_heroes === 'object') || i.prefab === 'emblem');
 const built = JSON.parse(readFileSync(join(ASSETS, 'heroes/index.json'), 'utf8')).heroes.map((h) => h.id);
 const npc = parseKV(readFileSync(join(GAME, 'scripts/npc/npc_heroes.txt'), 'utf8')).data.DOTAHeroes;
 const gameHeroes = Object.entries(npc).filter(([k, h]) => k.startsWith('npc_dota_hero_') && h && typeof h === 'object' && h.Enabled !== '0' && k !== 'npc_dota_hero_base').map(([k]) => k.slice(14));
@@ -48,8 +49,12 @@ log(`${fresh.length} new or changed items (${fresh.slice(0, 8).map(([id, i]) => 
 
 if (newHeroes.length || reform.length) run('build-heroes.mjs', '--game', GAME, '--cli', CLI, '--only', [...newHeroes, ...reform].join(','));
 if (newHeroes.length) run('build-portraits.mjs', '--game', GAME, '--cli', CLI);
-const heroes = [...new Set([...forItems, ...newHeroes])];
+// An emblem is in every hero's catalog.
+const heroes = fresh.some(([, i]) => i.prefab === 'emblem') ? [...new Set([...built, ...newHeroes])] : [...new Set([...forItems, ...newHeroes])];
+// Loading screens new to the heroes (those built before are kept).
+const screens = heroScreens(ig).map((s) => s.id), newScreens = screens.filter((id) => !(state?.screens || []).includes(id));
 if (heroes.length) run('build-items.mjs', '--game', GAME, '--cli', CLI, '--only', heroes.join(','), '--keep', '--items', fresh.map(([id]) => id).join(','));
-if (heroes.length && !flag('no-deploy') && !flag('dry')) { log('→ deploy'); execFileSync('sh', [join(ROOT, 'tools/deploy.sh')], { cwd: ROOT, stdio: 'inherit' }); }
-if (!flag('dry')) writeFileSync(STATE, JSON.stringify({ updated: new Date().toISOString(), items: items.map(([id]) => id), signs }));
-log(heroes.length ? `done: ${heroes.length} heroes` : 'nothing new');
+if (newScreens.length || newHeroes.length) run('build-screens.mjs', '--game', GAME, '--cli', CLI);
+if ((heroes.length || newScreens.length) && !flag('no-deploy') && !flag('dry')) { log('→ deploy'); execFileSync('sh', [join(ROOT, 'tools/deploy.sh')], { cwd: ROOT, stdio: 'inherit' }); }
+if (!flag('dry')) writeFileSync(STATE, JSON.stringify({ updated: new Date().toISOString(), items: items.map(([id]) => id), signs, screens }));
+log(heroes.length || newScreens.length ? `done: ${heroes.length} heroes, ${newScreens.length} loading screens` : 'nothing new');

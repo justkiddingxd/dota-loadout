@@ -3,7 +3,7 @@
 // <out>/heroes/<hero>/items.json — his slots, the items for each, their styles and sets.
 //   node tools/build-items.mjs --game <…/dota> --only marci,juggernaut --cli <Source2Viewer-CLI>
 // Options: --out assets   --jobs 4   --keep (skip built items)   --items <id,…> (build these even with --keep)
-// Left out for now: slots not worn on the hero (taunts, pets, voices, personas, ability effects,
+// Left out for now: slots not worn on the hero (pets, voices, personas, ability effects,
 // statues) and items that change the hero himself (arcanas, personas: loadCosmetics' unsupported).
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -17,11 +17,22 @@ const game = resolve(opt('game', '.cache/game/dota')), out = resolve(opt('out', 
 const only = (opt('only', '') || '').split(',').filter(Boolean), redo = new Set((opt('items', '') || '').split(',').filter(Boolean).map(Number));
 if (!cli) throw new Error('--cli <Source2Viewer-CLI> is needed');
 const CACHE = resolve('.cache');
-const NOT_WORN = /taunt|voice|ability_effects|effigy|costume|ward|courier|loading_screen|announcer|music|hud|cursor|weather|terrain|emblem|multikill|streak|death_effects/;
+const NOT_WORN = /voice|ability_effects|effigy|costume|ward|courier|loading_screen|announcer|music|hud|cursor|weather|terrain|emblem|multikill|streak|death_effects/;
 
 const { heroes } = loadGame(game), cosmetics = loadCosmetics(game);
 // The prismatic gems' colours, for the items that take one.
 writeFileSync(join(out, 'gems.json'), JSON.stringify({ version: 1, prismatic: prismaticColors(game) }));
+// Emblems: any hero's (the effect at his feet), built once, a slot of every catalog.
+const emblems = [];
+for (const item of cosmetics.emblems) {
+  const dir = join(out, 'items', String(item.id));
+  if (!(flag('keep') && !redo.has(item.id) && existsSync(join(dir, 'item.json')))) {
+    try { const r = await buildItem({ game, cli, item, heroBones: new Set(), out: dir, temp: join(CACHE, 'temp', `item${item.id}`) }); if (!r.systems) { rmSync(dir, { recursive: true, force: true }); console.log(`emblem ${item.id}: no effect`); continue; } }
+    catch (e) { console.log(`emblem ${item.id}: ERROR ${e.message.split('\n')[0]}`); continue; }
+  }
+  emblems.push(item);
+}
+console.log(`${emblems.length} emblems`);
 const list = heroes.filter((h) => !only.length || only.includes(h.id));
 for (const hero of list) {
   const heroDir = join(out, 'heroes', hero.id), c = cosmetics.get(hero.npc);
@@ -56,11 +67,11 @@ for (const hero of list) {
   };
   await Promise.all(Array.from({ length: jobs }, worker));
   // The catalog: slots in the game's order with their items, defaults first; sets of built items.
-  const ok = items.filter((i) => built[i.id] && !built[i.id].error && built[i.id].worn);
+  const ok = [...items.filter((i) => built[i.id] && !built[i.id].error && built[i.id].worn), ...emblems];
   const manifests = Object.fromEntries(ok.map((i) => [i.id, JSON.parse(readFileSync(join(out, 'items', String(i.id), 'item.json'), 'utf8'))]));
   const catalog = {
     version: 1,
-    slots: c.slots.filter((s) => ok.some((i) => i.slot === s.name)).map((s) => ({ name: s.name, text: s.text, ...(/_persona_(\d+)$/.test(s.name) ? { persona: +/_persona_(\d+)$/.exec(s.name)[1] } : {}), items: ok.filter((i) => i.slot === s.name).sort((a, b) => b.default - a.default || b.id - a.id).map((i) => i.id) })),
+    slots: [...c.slots, cosmetics.emblemSlot].filter((s) => ok.some((i) => i.slot === s.name)).map((s) => ({ name: s.name, text: s.text, ...(/_persona_(\d+)$/.test(s.name) ? { persona: +/_persona_(\d+)$/.exec(s.name)[1] } : {}), items: ok.filter((i) => i.slot === s.name).sort((a, b) => b.default - a.default || b.id - a.id).map((i) => i.id) })),
     items: Object.fromEntries(ok.map((i) => [i.id, { name: i.name, slot: i.slot, rarity: i.rarity, default: i.default || undefined, set: i.set || undefined,
       prismatic: (!i.default && SOCKETS[i.id]) || undefined,
       unusual: manifests[i.id].unusual?.map((u) => ({ id: u.id, name: u.name })),

@@ -22,6 +22,24 @@ export function formatLoadout({ hero, worn = {}, gems = {}, unusual = {}, kineti
   return `#${hero}${parts.length ? `/${parts.join(',')}` : ''}`;
 }
 
+// The ability an effect is for, by its file's name: an index of abilities ([{ id, name }], the
+// hero's, in heroes/index.json), or -1 (an attack's, a death's, or no clear one).
+// particles/units/heroes/hero_antimage/antimage_manavoid → antimage_mana_void.
+export function abilityOf(system, abilities) {
+  const file = system.split('/').pop(), joined = file.replace(/_/g, ''), stem = (w) => w.replace(/e?s$/, ''), words = file.split('_').map(stem);
+  if (/attack|_death|loadout|ambient|base_|blur|_idle|spawn|portrait|levelup|_trail|_glow|footstep/.test(file) || !abilities.length) return -1;
+  // The heroes' prefix of the ids (antimage_) is left out.
+  const ids = abilities.map((a) => a.id), prefix = ids.reduce((p, id) => { while (p && !id.startsWith(p)) p = p.slice(0, p.lastIndexOf('_', p.length - 2) + 1); return p; }, ids[0].slice(0, ids[0].lastIndexOf('_') + 1));
+  const near = (x, y) => x === y || (x.length > 3 && y.length > 3 && (x.startsWith(y.slice(0, 4)) || y.startsWith(x.slice(0, 4))));
+  const scores = abilities.map((a) => {
+    const own = a.id.slice(prefix.length).split('_').filter(Boolean).map(stem), core = own.join(''), name = (a.name?.en || '').toLowerCase().replace(/[^a-z]/g, '');
+    if ((core.length > 3 && joined.includes(core)) || (name.length > 4 && joined.includes(name))) return 10 + core.length / 100;
+    return own.filter((x) => words.some((y) => near(x, y))).length + own.filter((x) => x.length > 4 && joined.includes(x.slice(0, 5))).length / 2;
+  });
+  const top = Math.max(...scores), i = scores.indexOf(top);
+  return top > 0 && scores.filter((x) => x === top).length === 1 ? i : -1;
+}
+
 const json = (url) => fetch(url).then((r) => { if (!r.ok) throw new Error(`${url}: ${r.status}`); return r.json(); });
 
 export class Loadout {

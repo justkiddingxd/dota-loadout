@@ -17,6 +17,14 @@ export const DEFAULT_ASSETS = 'https://loadout.nyan.cafe/';
 // Bloom: how much of the halo of what is brighter than white is added (options.bloom; false for none).
 const BLOOM = 0.35;
 // Light of the loadout page when a hero has no portrait of his own.
+// Effigies' stuffs: colour (linear), how much of a metal it is, its gloss and how bright its highlight,
+// and the rim of light at its edges.
+const STATUES = {
+  gold: { color: [1, 0.55, 0.16], metal: 0.85, gloss: 30, shine: 1, rim: [0.45, 0.3, 0.08] },
+  frost: { color: [0.55, 0.78, 1], metal: 0.35, gloss: 60, shine: 1, rim: [0.45, 0.7, 1] },
+  jade: { color: [0.14, 0.5, 0.3], metal: 0.15, gloss: 40, shine: 0.45, rim: [0.15, 0.4, 0.25] },
+  stone: { color: [0.5, 0.48, 0.45], metal: 0, gloss: 6, shine: 0.08, rim: [0.05, 0.05, 0.05] },
+};
 const DEFAULT_LIGHTING = {
   light: { angles: [50, 145, 0], color: [234, 243, 254], scale: 1.45 }, ambient: { angles: [-27, -114, 24], color: [79, 93, 93], scale: 5 },
   shadow: { color: [56, 56, 56], scale: 5 }, camera: { position: [800, -370, 112] },
@@ -73,6 +81,7 @@ void main() {
     this.light = {
       uLightDir: { value: new THREE.Vector3() }, uLightColor: { value: new THREE.Color() }, uAmbientDir: { value: new THREE.Vector3() }, uAmbientColor: { value: new THREE.Color() },
       uAmbientTint: { value: new THREE.Color() }, uShadowColor: { value: new THREE.Color() }, uUp: { value: new THREE.Vector3() },
+      uStatue: { value: 0 }, uStatueColor: { value: new THREE.Color() }, uStatueRim: { value: new THREE.Color() }, uStatueMetal: { value: 0 }, uStatueGloss: { value: 1 }, uStatueShine: { value: 1 },
     };
     this.toLight = new THREE.Vector3(0, 1, 1).normalize(); this.ambientDir = new THREE.Vector3(0, 1, 0);
     this.sun = new THREE.DirectionalLight(0xffffff, 0); this.sun.castShadow = true; this.sun.shadow.mapSize.set(2048, 2048); this.sun.shadow.bias = -0.0005; this.sun.shadow.normalBias = 0.02;
@@ -104,6 +113,7 @@ void main() {
     this.applyLighting(manifest.lighting || DEFAULT_LIGHTING, hero);
     this.turn.angle = this.turn.target = this.turn.velocity = 0; this.view.zoom = this.view.zoomTarget = 1;
     this.fit();
+    if (this.effigy) await this.statue(this.effigy);
     // Each kinetic gem with the activities it changes (those of the variants with its modifiers).
     const variants = manifest.animations?.variants || [];
     const kinetic = (manifest.kinetic || []).map((k) => ({ ...k, changes: [...new Set(variants.filter((v) => v.modifiers.some((m) => k.activities.some(([, km]) => km === m))).map((v) => v.activity))] }));
@@ -127,6 +137,20 @@ void main() {
   // A kinetic gem in what a slot wears: its activities ([[activity, modifier]], from the manifest's
   // kinetic list), or null; the hero's animations take its modifiers.
   kinetic(slot, activities) { this.hero?.kinetic(slot, activities); }
+  // The hero as an effigy: a statue of gold, frost, jade or stone (null: himself), on that effigy's
+  // pedestal (assets' effigies/<stuff>/), without his effects. Pause him to keep his pose.
+  async statue(stuff) {
+    const look = stuff && STATUES[stuff], u = this.light; this.effigy = look ? stuff : null;
+    u.uStatue.value = look ? 1 : 0;
+    if (look) { u.uStatueColor.value.setRGB(...look.color); u.uStatueRim.value.setRGB(...look.rim); u.uStatueMetal.value = look.metal; u.uStatueGloss.value = look.gloss; u.uStatueShine.value = look.shine; }
+    const hero = this.hero; if (!hero) return;
+    const source = look ? await fetchJson(new URL(`effigies/${stuff}/`, this.assets).href, 'pedestal.json').catch(() => null) : null;
+    if (hero === this.hero && this.effigy === (look ? stuff : null)) await hero.pedestal(source);
+  }
+  // Effects worn items change that the hero shows only when he acts (his abilities'): [{ slot, from, to }].
+  get abilityEffects() { return this.hero?.abilityEffects || []; }
+  // Starts one of them once at the hero (from: the hero's effect; what is worn puts its own in).
+  cast(system) { return this.hero?.cast(system) ?? false; }
   unload() { if (!this.hero) return; this.scene.remove(this.hero.lib.group, this.hero.turntable); this.hero.dispose(); this.hero = null; }
 
   get animations() { return this.hero?.animations || []; }
@@ -206,11 +230,11 @@ void main() {
     t.angle += (t.target - t.angle) * (1 - Math.exp(-EASE * real)); this.hero.turntable.rotation.y = t.angle;
     if (Math.abs(this.view.zoomTarget - this.view.zoom) > 1e-4) { this.view.zoom += (this.view.zoomTarget - this.view.zoom) * (1 - Math.exp(-EASE * real)); this.place(); }
     this.hero.update(dt, this.camera);
-    const r = this.renderer;
+    const r = this.renderer; this.hero.lib.group.visible = !this.effigy;
     if (this.soft) {
       const fx = this.hero.lib.group, shadows = r.shadowMap.autoUpdate; fx.visible = false; r.shadowMap.autoUpdate = false; this.scene.overrideMaterial = this.soft.material;
       r.setRenderTarget(this.soft.target); r.clear(); r.render(this.scene, this.camera);
-      this.scene.overrideMaterial = null; r.shadowMap.autoUpdate = shadows; fx.visible = true;
+      this.scene.overrideMaterial = null; r.shadowMap.autoUpdate = shadows; fx.visible = !this.effigy;
       SOFT.tSceneDepth.value = this.soft.target.depthTexture; SOFT.uNear.value = this.camera.near; SOFT.uFar.value = this.camera.far; SOFT.uSoft.value = true;
     }
     r.setRenderTarget(this.hdr); r.clear(); r.render(this.scene, this.camera);
@@ -314,6 +338,9 @@ async function buildHero(manifest, url, manager, time, light, textureScale = 1) 
   const heroMeshes = []; root.traverse((o) => { if (o.isMesh) heroMeshes.push(o); });
   for (const name of items) { const w = fit(loaded[name].scene); defaults.set(name, w); worn.set(name, { ...w, item: null }); putOn(w); }
   const turntable = new THREE.Group(); turntable.add(root); if (loaded.pedestal) turntable.add(loaded.pedestal.scene);
+  let effigy = null;
+  // Pedestals are not part of a statue.
+  const notStatue = (scene) => scene?.traverse((o) => { if (o.material?.userData?.hero) o.material.userData.hero.uStatueSkip.value = 1; });
   const materials = new Map();
   // An item's materials come with it, their textures from its folder: keyed by both.
   // skin: the materials a skin (material group) puts in place of the default ones, by name.
@@ -328,7 +355,7 @@ async function buildHero(manifest, url, manager, time, light, textureScale = 1) 
     o.material = materials.get(base + key);
   };
   const dress = (group, ...rest) => group.traverse((o) => { if (o.isMesh) dressMesh(o, ...rest); });
-  dress(turntable);
+  dress(turntable); notStatue(loaded.pedestal?.scene);
   // The hero's own skin: what an item that is only his form (an arcana's style) asks for.
   const reskin = () => {
     const k = Math.max(0, ...[...worn.values()].filter((w) => w.item && w.style.form && !w.style.models?.length).map((w) => w.style.skin || 0));
@@ -501,6 +528,7 @@ async function buildHero(manifest, url, manager, time, light, textureScale = 1) 
   const drive = (e, origin) => {
     const cps = e.sim.cps; cps.clear(); cps.set(0, cpOf(origin)); cps.set(15, GEMLESS); cps.set(16, GEMLESS);
     for (const d of e.drivers) cps.set(d.cp, e.fixed.get(d.cp) || placeCP(d, e.owner, origin));
+    for (const [cp, c] of e.aims || []) if (!e.drivers.some((d) => d.cp === cp)) cps.set(cp, c);
     const gem = gemPoints(e.owner); if (gem) { cps.set(15, gem[0]); cps.set(16, gem[1]); }
   };
   // The ambient effects: the hero's own and his items' — a slot's default ones only while it wears
@@ -571,6 +599,7 @@ async function buildHero(manifest, url, manager, time, light, textureScale = 1) 
       // outlives its animation by a second is stopped (Marci's taunt basket, which no event stops).
       for (let i = live.length - 1; i >= 0; i--) { const e = live[i]; e.born += dt;
         e.over = e.sequence === currentName ? 0 : (e.over || 0) + dt; if (e.over > 1) e.sim.stopEmission();
+        if (e.life && e.born > e.life) e.sim.stopEmission();
         if (e.kill || e.sim.finished || e.born > 20 || (e.born > 0.5 && e.sim.count() === 0 && e.sequence !== currentName)) { e.sim.dispose(); live.splice(i, 1); } }
       for (const e of [...effects, ...live]) e.sim.render(camera, groupInverse);
     },
@@ -592,6 +621,37 @@ async function buildHero(manifest, url, manager, time, light, textureScale = 1) 
     kinetic(slot, activities) { if (activities?.length) kinetics.set(slot, activities); else kinetics.delete(slot); remodify(); },
     // The sequence playing now (an animation's, or the variant the worn items and gems pick).
     get sequence() { return currentName; },
+    // An effigy's pedestal in place of his own (source: { manifest, url } of an effigies/<stuff>
+    // folder), he standing on its top where his feet are; null: his own back.
+    async pedestal(source) {
+      let next = null, height = 0;
+      if (source) {
+        const m = source.manifest, scene = (await loader.loadAsync(source.url(m.model))).scene;
+        dress(scene, m.materials, textureOf(new THREE.TextureLoader(), source.url), source.url(''), null);
+        scene.traverse((o) => { if (o.isMesh) o.castShadow = false; }); notStatue(scene); scene.updateMatrixWorld(true);
+        const hit = new THREE.Raycaster(new THREE.Vector3(0, 20, 0), new THREE.Vector3(0, -1, 0)).intersectObject(scene, true)[0];
+        next = scene; height = hit ? hit.point.y : 0;
+      }
+      if (effigy) turntable.remove(effigy);
+      effigy = next; if (effigy) turntable.add(effigy);
+      if (loaded.pedestal) loaded.pedestal.scene.visible = !effigy;
+      root.position.y = height;
+    },
+    // Effects worn items put in place of the hero's that he does not show by himself (no ambient
+    // effect, no animation's event): his abilities' mostly. [{ slot, from, to }]
+    get abilityEffects() {
+      const drawn = new Set([...(manifest.effects || []).map((e) => e.system), ...events.map((e) => e.system)]);
+      return [...worn].flatMap(([slot, w]) => (w.item ? Object.entries(w.style.particles || {}).filter(([from]) => !drawn.has(from)).map(([from, to]) => ({ slot, from, to })) : []));
+    },
+    // Starts an effect once at the hero, as worn items have it: on its own drivers, else at his feet;
+    // the points it may aim at (CP 1–3: a target, a projectile's end) a few steps in front of him.
+    cast(system) {
+      const def = lib.system(replaced.get(system) ?? system); if (!def) return false;
+      const own = driversFor(def, null), e = instance(def, replacedBy.get(system) || 'hero', own.length ? own : [{ cp: 0, type: 'PATTACH_ABSORIGIN_FOLLOW', attachment: null, offset: null }]);
+      const ahead = cpOf(heroOrigin().multiply(new THREE.Matrix4().makeTranslation(300, 0, 0)));
+      e.aims = [1, 2, 3].map((cp) => [cp, ahead]);
+      live.push(Object.assign(e, { system, sequence: currentName, born: 0, life: 4 })); return true;
+    },
     get unusuals() { return Object.fromEntries(unusuals); },
     // The meshes a slot wears now (for checks and tools).
     slotMeshes: (slot) => worn.get(slot)?.meshes || [],

@@ -174,3 +174,5 @@ img { display: block; }
 @media (max-width: 480px) {
   .shelf-head, .tabs, .filters, .shelf-body { padding-left: 12px; padding-right: 12px; }
 }
+.cards.effigies { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); margin-bottom: 12px; }
+.card.effigy .pic { background: radial-gradient(circle at 38% 30%, rgba(255, 255, 255, 0.75), var(--c, #444) 38%, #000 105%); }

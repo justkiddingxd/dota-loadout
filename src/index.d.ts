@@ -48,6 +48,13 @@ export class HeroViewer {
   unusual(slot: string, id: number | null): void;
   /** A kinetic gem's activities in a slot's item (Loaded.kinetic[i].activities), or null. */
   kinetic(slot: string, activities: [string, string][] | null): void;
+  /** Effects worn items put in place of the hero's that he shows only when he acts (his abilities'). */
+  readonly abilityEffects: { slot: string; from: string; to: string }[];
+  /** Starts one of them (its from) once at the hero, as worn items have it. False if there is none. */
+  cast(system: string): boolean;
+  /** The hero as an effigy of gold, frost, jade or stone on its pedestal, without effects; null: himself. Pause to keep a pose. */
+  statue(stuff: 'gold' | 'frost' | 'jade' | 'stone' | null): Promise<void>;
+  readonly effigy: string | null;
   readonly animations: Animation[];
   /** Plays an animation by name; looping ones stay, others return to the idle. Its length in seconds. */
   play(name: string): number;
@@ -90,6 +97,9 @@ export class Loadout {
   kineticGem(slot: string, id: number | null): void;
   readonly kinetics: KineticGem[];
 }
+
+/** The ability (an index of abilities, the hero's in heroes/index.json) an effect is most likely for, by its file's name; -1 if none. */
+export function abilityOf(system: string, abilities: { id: string; name?: { en: string } }[]): number;
 
 export function heroMaterial(material: object, texture: (file: string, srgb?: boolean) => THREE.Texture, time: { value: number }, light: object, cube?: (file: string) => THREE.Texture): THREE.Material;
 export const SOURCE_TO_GLTF: THREE.Matrix4;

@@ -78,6 +78,9 @@ new HeroViewer(canvas, {
 viewer.gem(slot, '#rrggbb')          // a prismatic gem's colour in a slot's item
 viewer.unusual(slot, id)             // an unusual effect of the item's list
 viewer.kinetic(slot, activities)     // a kinetic gem's [[activity, modifier]]
+viewer.abilityEffects                // [{ slot, from, to }]: effects worn items put in place of his abilities'
+viewer.cast(from)                    // one of them, once, at the hero (abilityOf(from, abilities) names its ability)
+await viewer.statue('gold')          // an effigy: gold, frost, jade or stone on its pedestal; null: himself
 viewer.rotate(angle, { relative })   // turn the hero (radians), eased
 viewer.zoom(1.5)                     // 0.6 – 3
 viewer.dispose()
@@ -148,9 +151,14 @@ An item with a prismatic socket in the game (Terrorblade's and Techies' arcanas)
 season's list, Crownfall, Frostivus or New Bloom (`viewer.unusual(slot, 836)`; the catalog lists them
 under `unusual`). The site keeps both in the address: `#nevermore/arms=29087~creators_light!837`.
 
+Taunts are items of the `taunt` slot: their activity modifier picks the hero's taunt (the site plays it).
+Emblems (the effect at a hero's feet) are any hero's: built once, a slot of every catalog. The heroes'
+loading screens — those for a hero or sold with his items — are the site's backdrops
+(`node tools/build-screens.mjs`: `assets/screens/<id>.webp`, `assets/heroes/<id>/screens.json`), and
+`node tools/build-effigies.mjs` builds the effigies' pedestals (`assets/effigies/<stuff>/`).
+
 Items go to `assets/items/<id>/` (models, materials and effects of all their styles), each hero's catalog
-to `assets/heroes/<id>/items.json`. They are not kept in git (about 250 KB an item, 10 000 items). Not
-done yet: taunts, pets, personas, arcanas and items that change animations.
+to `assets/heroes/<id>/items.json`. They are not kept in git (about 250 KB an item, 10 000 items).
 
 ### `hero.json`
 
@@ -181,4 +189,6 @@ Loadout — все герои Dota 2 в браузере на three.js: игро
 после патча: `tools/extract-dota.cmd` на Windows с установленной Dota, затем
 `npm run heroes -- --zip <архив>`. Косметика: `node tools/fetch-dota.mjs` качает файлы игры из Steam,
 `node tools/build-items.mjs` собирает предметы, `node tools/update.mjs` после патча берёт новое и выкладывает
-(на сервере раз в сутки, `loadout-update.timer`; подробности выше, в Cosmetics).
+(на сервере раз в сутки, `loadout-update.timer`; подробности выше, в Cosmetics). На сайте есть насмешки,
+эмблемы, эффекты способностей у предметов, загрузочные экраны героя как фон и статуи-эффигии (золото, лёд,
+нефрит, камень).

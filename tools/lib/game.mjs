@@ -10,7 +10,7 @@ const ATTRIBUTES = { DOTA_ATTRIBUTE_STRENGTH: 'str', DOTA_ATTRIBUTE_AGILITY: 'ag
 // Heroes in the files that are not heroes to pick.
 const HIDDEN = new Set(['npc_dota_hero_base', 'npc_dota_hero_target_dummy']);
 
-function localization(game, lang) {
+export function localization(game, lang) {
   const all = {};
   for (const file of ['dota', 'abilities', 'hero_lore', 'items']) {
     const path = `resource/localization/${file}_${lang}.txt`;
@@ -284,9 +284,11 @@ export function loadCosmetics(game) {
   const setOf = new Map();
   for (const [key, set] of Object.entries(ig.item_sets || {})) for (const name of Object.keys(set.items || {})) if (byName.has(name)) setOf.set(byName.get(name), key);
   const unusualOf = unusualEffects(game, ig, text);
-  const heroes = new Map();
+  const heroes = new Map(), emblems = [];
   for (const [id, item] of Object.entries(ig.items)) {
-    if (!(item.prefab === 'default_item' || item.prefab === 'wearable') || !item.used_by_heroes || typeof item.used_by_heroes !== 'object') continue;
+    // Taunts too: an item of the taunt slot whose activity modifier picks the hero's taunt animation.
+    const emblem = item.prefab === 'emblem';
+    if (!emblem && (!(item.prefab === 'default_item' || item.prefab === 'wearable' || item.prefab === 'taunt') || !item.used_by_heroes || typeof item.used_by_heroes !== 'object')) continue;
     const visuals = item.visuals || {}, modifiers = Object.entries(visuals).filter(([k, m]) => /^asset_modifier/.test(k) && m && typeof m === 'object').map(([, m]) => m);
     const styleKeys = visuals.styles ? Object.keys(visuals.styles).sort((a, b) => a - b) : [null], persona = modifiers.find((m) => m.type === 'persona')?.persona;
     const styles = styleKeys.map((s) => {
@@ -318,6 +320,14 @@ export function loadCosmetics(game) {
         form: persona ? `persona${persona}` : (() => { const m = mine.find((x) => x.type === 'entity_model' && /^npc_dota_hero_/.test(x.asset || '') && /\.vmdl$/.test(x.modifier || '')); return m ? { npc: m.asset, model: m.modifier } : null; })(),
       };
     });
+    // An emblem is any hero's: the effect at his feet (its loadout one if it has, not the menu's
+    // generic stand-in's).
+    if (emblem) {
+      const own = modifiers.filter((m) => m.type === 'particle_create' && !m.asset && /\.vpcf$/.test(m.modifier || ''));
+      const fx = (own.find((m) => m.spawn_in_loadout_only === '1') || own[0])?.modifier.replace(/\.vpcf$/, '');
+      if (fx) emblems.push({ id: +id, name: text(item.item_name) || { en: item.name, ru: item.name }, slot: 'emblem', rarity: item.item_rarity || 'common', default: false, set: null, styles: [{ ...styles[0], effects: [fx] }] });
+      continue;
+    }
     const unsupported = [...new Set(modifiers.map((m) => m.type).filter((t) => UNSUPPORTED.has(t)))], unusual = unusualOf(item);
     for (const npc of Object.keys(item.used_by_heroes)) {
       const h = heroes.get(npc) || heroes.set(npc, { items: [] }).get(npc);
@@ -333,5 +343,29 @@ export function loadCosmetics(game) {
     h.sets = Object.entries(ig.item_sets || {}).map(([key, set]) => ({ key, name: text(set.name), items: Object.keys(set.items || {}).map((n) => byName.get(n)).filter((i) => ids.has(i)) }))
       .filter((s) => s.items.length > 1 && h.items.some((i) => i.set === s.key));
   }
+  // Emblems, any hero's (heroes.emblems), and their slot's name.
+  heroes.emblems = emblems; heroes.emblemSlot = { name: 'emblem', text: text('#LoadoutSlot_Emblem') || text('#DOTA_WearableType_Emblem') || { en: 'Emblem', ru: 'Эмблема' } };
   return heroes;
 }
+
+// Loading screens of heroes: those for a hero (used_by_heroes) or sold in a bundle with his items —
+// [{ id, item, image, npcs }], image the panorama path its loading_screen modifier names (no
+// extension: <image>.vtex_c, or _tga/_png/_psd/_jpg before it, as the game has it).
+export function heroScreens(ig) {
+  const byName = new Map(Object.entries(ig.items).map(([id, i]) => [i.name, id])), npcsOf = new Map();
+  const add = (name, npcs) => { for (const n of npcs) if (/^npc_dota_hero_/.test(n)) (npcsOf.get(name) || npcsOf.set(name, new Set()).get(name)).add(n); };
+  for (const b of Object.values(ig.items)) {
+    if (b.prefab !== 'bundle' || !b.bundle || typeof b.bundle !== 'object') continue;
+    const names = Object.keys(b.bundle), npcs = names.flatMap((n) => Object.keys(ig.items[byName.get(n)]?.used_by_heroes || {}));
+    for (const n of names) if (ig.items[byName.get(n)]?.prefab === 'loading_screen') add(n, npcs);
+  }
+  const out = [];
+  for (const [id, it] of Object.entries(ig.items)) {
+    if (it.prefab !== 'loading_screen') continue;
+    add(it.name, Object.keys(it.used_by_heroes || {}));
+    const image = Object.values(it.visuals || {}).find((m) => m?.type === 'loading_screen' && m.modifier && !/^file:/.test(m.modifier))?.modifier;
+    if (image && npcsOf.has(it.name)) out.push({ id: +id, item: it, image: `panorama/images/${image.toLowerCase()}`, npcs: [...npcsOf.get(it.name)] });
+  }
+  return out;
+}
+export const screenFile = (image, has) => ['', '_tga', '_png', '_psd', '_jpg'].map((s) => `${image.replace(/\.vtex$/, '')}${s}.vtex_c`).find(has) || null;

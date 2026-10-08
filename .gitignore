@@ -6,3 +6,6 @@ dist/
 assets/items/
 assets/heroes/*/items.json
 assets/heroes/*/forms/
+assets/heroes/*/screens.json
+assets/screens/
+assets/effigies/

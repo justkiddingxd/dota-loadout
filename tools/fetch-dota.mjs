@@ -13,6 +13,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, wri
 import { dirname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { parseKV } from './lib/kv1.mjs';
+import { heroScreens, screenFile } from './lib/game.mjs';
 import { references, Vpk } from './lib/vpk.mjs';
 
 const exec = promisify(execFile);
@@ -99,7 +100,7 @@ async function take(wanted, follow = true) {
 }
 
 // Scripts and localization, as they are.
-const scripts = ['scripts/npc/npc_heroes.txt', 'scripts/items/items_game.txt', 'scripts/npc/portraits_full_body_loadout.txt',
+const scripts = ['scripts/npc/npc_heroes.txt', 'scripts/items/items_game.txt', 'scripts/animation_statues.txt', 'scripts/npc/portraits_full_body_loadout.txt',
   ...['dota', 'abilities', 'hero_lore', 'items'].flatMap((f) => ['english', 'russian'].map((l) => `resource/localization/${f}_${l}.txt`)),
   ...[...vpk.files.keys()].filter((p) => /^scripts\/npc\/heroes\/npc_dota_hero_.*\.txt$/.test(p)).sort()];
 log('Scripts…'); await take(scripts, false);
@@ -117,6 +118,18 @@ for (const item of Object.values(items)) {
   assets(item, roots); count++;
   if (!defaultsOnly && item.image_inventory) roots.add(`panorama/images/${item.image_inventory.toLowerCase()}_png.vtex_c`);
 }
+// Emblems (any hero's), couriers and wards, with their icons; the heroes' loading screens.
+const itemsGame = parseKV(text('scripts/items/items_game.txt')).data.items_game;
+if (!defaultsOnly) {
+  for (const item of Object.values(items)) {
+    if (!['emblem', 'courier', 'ward'].includes(item.prefab)) continue;
+    assets(item, roots); count++;
+    if (item.image_inventory) roots.add(`panorama/images/${item.image_inventory.toLowerCase()}_png.vtex_c`);
+  }
+  for (const s of heroScreens(itemsGame)) { const f = screenFile(s.image, (p) => vpk.has(p)); if (f) roots.add(f); }
+}
+// Effigies: the statue materials the game puts over a hero, their pedestals, the statues' poses.
+for (const p of vpk.files.keys()) if (/^(materials\/models\/particle\/(statue_override_default|ice_statue(_dire)?)|models\/heroes\/pedestal\/(effigy_pedestal_default\/effigy_pedestal_default_radiant|effigy_pedestal_frost_radiant|pedestal_effigy_jade))\.(vmat|vmdl)_c$/.test(p)) roots.add(p);
 assets(parseKV(text('scripts/npc/portraits_full_body_loadout.txt')).data.DOTAFullBodyLoadoutPortraitInfo, roots);
 // The site's pictures of the heroes: their portraits (wide, tall for the picker, small icons), the
 // attributes' icons, the prismatic gem's, and the game's backgrounds (the site's backdrops).

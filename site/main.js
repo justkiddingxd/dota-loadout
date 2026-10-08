@@ -1,11 +1,11 @@
-import { HeroViewer } from '../src/index.js';
+import { abilityOf, HeroViewer } from '../src/index.js';
 
 const T = {
   ru: {
     heroes: 'Герои', items: 'Предметы', sets: 'Сеты', backdrops: 'Фон', backdrop: 'Фон', noBackdrop: 'Без фона', findBackdrop: 'Найти фон', all: 'Все', search: 'Найти героя', findItem: 'Найти предмет', findSet: 'Найти сет', allRarities: 'Все',
     attrs: { str: 'Сила', agi: 'Ловкость', int: 'Интеллект', all: 'Универсал' }, short: { str: 'STR', agi: 'AGI', int: 'INT', all: 'UNI' },
     saveFrame: 'Кадр', saveVideo: 'Видео', stop: 'Стоп', pause: 'Пауза', play: 'Пуск', recenter: 'Вид', share: 'Ссылка', shared: 'Ссылка скопирована', embed: 'Встроить', copy: 'Копировать', copied: 'Скопировано',
-    saved: 'Сохранено', noVideo: 'Браузер не умеет записывать видео', reset: 'Сбросить', worn: 'Надето', defaultItem: 'Стандарт', styles: 'стил.', style: 'Стиль', unusual: 'Необычный эффект', noUnusual: 'Нет', kinetic: 'Кинетический самоцвет', kineticTip: 'меняет анимации',
+    saved: 'Сохранено', noVideo: 'Браузер не умеет записывать видео', reset: 'Сбросить', worn: 'Надето', defaultItem: 'Стандарт', styles: 'стил.', style: 'Стиль', unusual: 'Необычный эффект', noUnusual: 'Нет', kinetic: 'Кинетический самоцвет', kineticTip: 'меняет анимации', effigy: 'Статуя', effigyTip: 'выберите анимацию и поставьте на паузу — это поза', noEffigy: 'Герой', stuffs: { gold: 'Золото', frost: 'Лёд', jade: 'Нефрит', stone: 'Камень' }, freeze: 'Застыть', unfreeze: 'Ожить', screens: 'Загрузочные экраны героя', screen: 'Загрузочный экран', scenes: 'Сцены', abilityFx: 'Эффекты способностей', abilityTip: 'нажмите — герой покажет', otherFx: 'Другое', playTaunt: 'Показать насмешку',
     gem: 'Призматический самоцвет', gemCard: 'Самоцвет', gemTab: 'Самоцвет', noGem: 'Без самоцвета', itemsN: 'предм.', noItems: 'Ничего не нашлось', nothing: 'Никого не нашлось',
     loading: 'Загрузка', failed: 'Не удалось загрузить героя', animation: 'Анимация',
     embedTitle: 'Встроить героя', embedText: 'Герой в этом же наряде на любой странице: элемент <dota-hero> из пакета dota-loadout (npm i dota-loadout three). Модели грузятся с этого сайта.',
@@ -17,7 +17,7 @@ const T = {
     heroes: 'Heroes', items: 'Items', sets: 'Sets', backdrops: 'Backdrop', backdrop: 'Backdrop', noBackdrop: 'None', findBackdrop: 'Find a backdrop', all: 'All', search: 'Find a hero', findItem: 'Find an item', findSet: 'Find a set', allRarities: 'All',
     attrs: { str: 'Strength', agi: 'Agility', int: 'Intelligence', all: 'Universal' }, short: { str: 'STR', agi: 'AGI', int: 'INT', all: 'UNI' },
     saveFrame: 'Save frame', saveVideo: 'Save video', stop: 'Stop', pause: 'Pause', play: 'Play', recenter: 'Recenter', share: 'Link', shared: 'Link copied', embed: 'Embed', copy: 'Copy', copied: 'Copied',
-    saved: 'Saved', noVideo: 'This browser cannot record video', reset: 'Reset', worn: 'Worn', defaultItem: 'Default', styles: 'styles', style: 'Style', unusual: 'Unusual effect', noUnusual: 'None', kinetic: 'Kinetic gem', kineticTip: 'changes animations',
+    saved: 'Saved', noVideo: 'This browser cannot record video', reset: 'Reset', worn: 'Worn', defaultItem: 'Default', styles: 'styles', style: 'Style', unusual: 'Unusual effect', noUnusual: 'None', kinetic: 'Kinetic gem', kineticTip: 'changes animations', effigy: 'Effigy', effigyTip: 'pick an animation and pause: that is the pose', noEffigy: 'The hero', stuffs: { gold: 'Gold', frost: 'Frost', jade: 'Jade', stone: 'Stone' }, freeze: 'Freeze', unfreeze: 'Unfreeze', screens: "The hero's loading screens", screen: 'Loading screen', scenes: 'Scenes', abilityFx: 'Ability effects', abilityTip: 'click: the hero shows it', otherFx: 'Other', playTaunt: 'Play the taunt',
     gem: 'Prismatic gem', gemCard: 'Prismatic gem', gemTab: 'Gem', noGem: 'No gem', itemsN: 'items', noItems: 'Nothing found', nothing: 'Nobody by that name',
     loading: 'Loading', failed: 'Could not load the hero', animation: 'Animation',
     embedTitle: 'Embed a hero', embedText: 'The hero in this outfit on any page: the <dota-hero> element of the dota-loadout package (npm i dota-loadout three). Models load from this site.',
@@ -39,6 +39,7 @@ const state = { gems: {}, unusual: {}, kinetic: {}, kinetics: [], palette: [], i
 // ---------------------------------------------------------------- viewer
 const canvas = $('[data-view]');
 const viewer = new HeroViewer(canvas, {
+  assets: new URL('./', location.href).href,
   onProgress: (loaded, total) => { $('[data-bar]').style.width = `${total ? Math.round((loaded / total) * 100) : 0}%`; },
 });
 globalThis.__loadout = viewer; // for poking at the scene from the console
@@ -55,7 +56,7 @@ function applyTexts() {
   $('[data-save-frame]').textContent = t().saveFrame; $('[data-reset]').textContent = t().recenter;
   renderPause(); renderRecord();
   for (const n of document.querySelectorAll('[data-t]')) n.textContent = t()[n.dataset.t];
-  $('[data-mode]').replaceChildren(...['items', 'sets', 'backdrops'].map((m) => { const b = el('button', { type: 'button', role: 'tab', textContent: t()[m] }); b.dataset.mode = m; b.onclick = () => setMode(m); return b; }));
+  $('[data-mode]').replaceChildren(...['items', 'sets', 'backdrops', 'effigy'].map((m) => { const b = el('button', { type: 'button', role: 'tab', textContent: t()[m] }); b.dataset.mode = m; b.onclick = () => setMode(m); return b; }));
   $('[data-attrs]').replaceChildren(...ATTRS.map((a) => {
     const b = el('button', { type: 'button', title: t().attrs[a] }, el('img', { src: `attributes/${a}.webp`, alt: '' }), t().short[a]);
     b.setAttribute('aria-pressed', state.filter.has(a)); b.onclick = () => { state.filter.has(a) ? state.filter.delete(a) : state.filter.add(a); applyTexts(); }; return b;
@@ -143,12 +144,14 @@ async function open(id) {
   if (!h || state.current?.id === h.id) return;
   const ticket = ++loads;
   state.current = h; state.active = null; afterFrame.delete(play.tick);
-  state.catalog = null; state.worn = {}; state.form = null; state.animations = null; state.tab = '#all'; state.rarity = null; state.itemQuery = ''; $('[data-item-search]').value = '';
+  state.catalog = null; backdrop.screens = []; state.worn = {}; state.form = null; state.animations = null; state.tab = '#all'; state.rarity = null; state.itemQuery = ''; $('[data-item-search]').value = '';
   renderHero(h); renderShelf();
   showLoading(h);
   try {
     // The catalog first: what the address has him wear may be another form of him (a persona, an arcana).
     state.catalog = await fetch(`heroes/${h.id}/items.json`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+    // His loading screens, as backdrops.
+    fetch(`heroes/${h.id}/screens.json`).then((r) => (r.ok ? r.json() : { screens: [] })).catch(() => ({ screens: [] })).then((d) => { if (state.current === h) { backdrop.screens = d.screens || []; if (state.mode === 'backdrops') renderShelf(); } });
     if (ticket !== loads) return;
     const asked = parseHash(); state.worn = valid(asked.worn);
     state.gems = Object.fromEntries(Object.entries(asked.gems).map(([slot, g]) => [slotNow(asked.worn, slot), g]).filter(([slot]) => state.worn[slot]));
@@ -292,6 +295,26 @@ async function wear(slot, id, style = 0) {
   await viewer.wear(slot, state.worn[slot] ? `items/${id}/` : null, style).catch((e) => console.error(e));
   if (gemOf(slot)) viewer.gem(slot, gemHex(gemOf(slot)));
   if (state.unusual[slot]) viewer.unusual(slot, state.unusual[slot]);
+  // A taunt shows itself; the item's ability effects are known once it is on.
+  if (/^taunt/.test(slot) && state.worn[slot]) playTaunt();
+  if (state.tab === slot) renderShelf();
+}
+const playTaunt = () => { const a = state.current && animsOf(state.current).find((x) => x.activity === 'ACT_DOTA_TAUNT'); if (a) play(a.name); };
+// The effects a slot's item puts in place of the hero's abilities' (the viewer's abilityEffects),
+// by ability (the hero's list; -1: no clear one): [[index, name, systems]].
+function abilityEffects(slot) {
+  const h = state.current, groups = new Map();
+  for (const { from } of viewer.abilityEffects.filter((x) => x.slot === slot && !/loadout|ambient|portrait|_idle/.test(x.from.split('/').pop()))) {
+    const i = abilityOf(from, h.abilities || []), key = i >= 0 ? i : from;
+    (groups.get(key) || groups.set(key, { i, name: i >= 0 ? h.abilities[i].name[lang] || h.abilities[i].name.en : from.split('/').pop().replace(/_/g, ' '), systems: [] }).get(key)).systems.push(from);
+  }
+  return [...groups.values()].sort((a, b) => (a.i < 0) - (b.i < 0) || a.i - b.i);
+}
+// An ability's effects: the hero casts it (its animation, if he has one) and they start.
+function castEffects(g) {
+  const a = g.i >= 0 && animsOf(state.current).find((x) => x.activity === `ACT_DOTA_CAST_ABILITY_${g.i + 1}`);
+  if (a) play(a.name);
+  setTimeout(() => { for (const s of g.systems) viewer.cast(s); }, a ? 250 : 0);
 }
 // What the address asks for, on the slots it names; the others go back to their defaults.
 function dress(worn) {
@@ -317,6 +340,7 @@ function renderShelf() {
   for (const b of $('[data-mode]').children) b.setAttribute('aria-selected', b.dataset.mode === state.mode);
   $('[data-item-search]').placeholder = state.mode === 'sets' ? t().findSet : state.mode === 'backdrops' ? t().findBackdrop : t().findItem;
   if (state.mode === 'backdrops') { tabs.hidden = true; rarities([]); return body.replaceChildren(backdropCards()); }
+  if (state.mode === 'effigy') { tabs.hidden = true; rarities([]); return body.replaceChildren(effigyCards()); }
   if (!c) { tabs.replaceChildren(); $('[data-rarities]').replaceChildren(); body.replaceChildren(); return; }
   const slots = c.slots.filter((s) => applies(s.name));
   // The gems of what takes one: a tab of their own (Terrorblade's arcana: his colour).
@@ -345,6 +369,9 @@ function renderShelf() {
     if (state.tab === s.name && it && it.styles.length > 1) parts.push(section(t().style, null, chips(it.styles.map((st, i) => [st.name?.[lang] || st.name?.en || String(i + 1), i === style, () => wear(s.name, id, i)]))));
     const rolls = unusualsOf(s.name);
     if (state.tab === s.name && rolls.length) { const now = state.unusual[s.name] ?? null; parts.push(section(t().unusual, null, chips([[t().noUnusual, now === null, () => setUnusual(s.name, null)], ...rolls.map((u) => [u.name[lang] || u.name.en, u.id === now, () => setUnusual(s.name, u.id)])]))); }
+    if (/^taunt/.test(s.name) && state.worn[s.name]) parts.push(section(t().acts.TAUNT, null, chips([[`▶ ${t().playTaunt}`, false, playTaunt]])));
+    const fx = state.worn[s.name] ? abilityEffects(s.name) : [];
+    if (fx.length) parts.push(section(t().abilityFx, t().abilityTip, chips(fx.map((g) => [`▶ ${g.name}${g.i < 0 ? '' : g.systems.length > 1 ? ` ×${g.systems.length}` : ''}`, false, () => castEffects(g)]))));
     if (state.tab === s.name && takesKinetic(s.name)) { const now = state.kinetic[s.name] ?? null; parts.push(section(t().kinetic, t().kineticTip, chips([[t().noUnusual, now === null, () => setKinetic(s.name, null)], ...state.kinetics.map((k) => [`${k.name[lang] || k.name.en}${k.changes?.length ? ` · ${k.changes.map(actName).join(', ')}` : ''}`, k.id === now, () => setKinetic(s.name, k.id)])]))); }
   }
   for (const s of shown) {
@@ -412,7 +439,10 @@ $('[data-item-search]').addEventListener('input', (e) => { state.itemQuery = e.t
 // ---------------------------------------------------------------- backdrops
 // The game's own backgrounds behind the hero (backgrounds/index.json): the dashboard's smoke by
 // default, as in the game; the viewer's choice is kept in this browser.
-const backdrop = { list: [], current: null, image: null };
+// A loading screen (ls<id>) is any hero's: one of the hero's own is picked, it stays for the next.
+const backdrop = { list: [], screens: [], current: null, image: null };
+const screenBackdrop = (s) => ({ key: `ls${s.id}`, name: s.name, url: `screens/${s.id}.webp`, thumb: `screens/${s.id}-s.webp`, floor: 0.92 });
+const backdropOf = (key) => backdrop.list.find((x) => x.key === key) || (/^ls\d+$/.test(key || '') ? backdrop.screens.map(screenBackdrop).find((x) => x.key === key) || { key, name: { en: '', ru: '' }, url: `screens/${key.slice(2)}.webp`, floor: 0.92 } : null);
 const savedBackdrop = (() => { try { return localStorage.getItem('loadout-backdrop'); } catch { return null; } })();
 // The part of an image that covers a w×h box, its floor (0 top, 1 bottom) a little above the box's bottom.
 function cover(img, w, h, floor = 0.85) {
@@ -420,25 +450,45 @@ function cover(img, w, h, floor = 0.85) {
   const sy = Math.min(Math.max(floor * img.naturalHeight - 0.82 * sh, 0), img.naturalHeight - sh); return [sx, sy, sw, sh];
 }
 function setBackdrop(key, save = true) {
-  const b = backdrop.list.find((x) => x.key === key) || null, stage = $('[data-stage]'); backdrop.current = b;
+  const b = backdropOf(key), stage = $('[data-stage]'); backdrop.current = b;
   if (save) { try { localStorage.setItem('loadout-backdrop', b ? b.key : 'none'); } catch { /* private mode */ } }
   if (!b) { backdrop.image = null; stage.style.backgroundImage = ''; stage.classList.remove('backdrop'); }
   else {
-    const url = `backgrounds/${b.file}`, img = new Image(); img.src = url; backdrop.image = img;
+    const url = b.url, img = new Image(); img.src = url; backdrop.image = img;
     stage.style.backgroundImage = `radial-gradient(ellipse at 50% 60%, transparent 35%, rgba(0, 0, 0, 0.55)), url("${url}")`;
     stage.style.setProperty('--floor', `${Math.round((b.floor ?? 0.85) * 100)}%`); stage.classList.add('backdrop');
   }
   if (state.mode === 'backdrops') renderShelf();
 }
 function backdropCards() {
-  const q = state.itemQuery.trim().toLowerCase(), list = backdrop.list.filter((b) => !q || [b.name[lang], b.name.en].some((n) => n?.toLowerCase().includes(q)));
-  return el('div', { className: 'cards backdrops' },
+  const q = state.itemQuery.trim().toLowerCase(), found = (b) => !q || [b.name[lang], b.name.en].some((n) => n?.toLowerCase().includes(q));
+  const cardOf = (b, label) => card({ label, pic: b.thumb || b.url, name: b.name[lang] || b.name.en, pressed: backdrop.current?.key === b.key, onclick: () => setBackdrop(b.key), kind: 'backdrop' });
+  const scenes = el('div', { className: 'cards backdrops' },
     card({ label: t().backdrop, pic: null, name: t().noBackdrop, pressed: !backdrop.current, onclick: () => setBackdrop(null), kind: 'backdrop' }),
-    ...list.map((b) => card({ label: t().backdrop, pic: `backgrounds/${b.file}`, name: b.name[lang] || b.name.en, pressed: backdrop.current === b, onclick: () => setBackdrop(b.key), kind: 'backdrop' })));
+    ...backdrop.list.filter(found).map((b) => cardOf(b, t().backdrop)));
+  const screens = backdrop.screens.map(screenBackdrop).filter(found);
+  if (!screens.length) return scenes;
+  return el('div', {}, section(t().screens, String(screens.length), el('div', { className: 'cards backdrops' }, ...screens.map((b) => cardOf(b, t().screen)))), section(t().scenes, null, scenes));
 }
 fetch('backgrounds/index.json').then((r) => (r.ok ? r.json() : { backgrounds: [] })).then((d) => {
-  backdrop.list = d.backgrounds || []; setBackdrop(savedBackdrop === 'none' ? null : savedBackdrop || 'dashboard', false);
+  backdrop.list = (d.backgrounds || []).map((b) => ({ ...b, url: `backgrounds/${b.file}` })); setBackdrop(savedBackdrop === 'none' ? null : savedBackdrop || 'dashboard', false);
 }).catch(() => {});
+
+// ---------------------------------------------------------------- effigies
+// The hero as a statue of the game's effigies' stuffs, on their pedestals; the pause holds his pose.
+const STUFFS = { gold: '#e0a040', frost: '#9fd0ff', jade: '#3fa36a', stone: '#8a8580' };
+function setEffigy(stuff) {
+  state.effigy = stuff; viewer.statue(stuff);
+  if (stuff && !viewer.paused) { viewer.paused = true; renderPause(); }
+  if (!stuff && viewer.paused) { viewer.paused = false; renderPause(); }
+  renderShelf();
+}
+function effigyCards() {
+  const pose = chips([[viewer.paused ? `▶ ${t().unfreeze}` : `❚❚ ${t().freeze}`, viewer.paused, () => { viewer.paused = !viewer.paused; renderPause(); renderShelf(); }]]);
+  return el('div', {}, section(t().effigy, t().effigyTip, el('div', { className: 'cards effigies' },
+    card({ label: t().effigy, pic: null, name: t().noEffigy, pressed: !state.effigy, onclick: () => setEffigy(null), kind: 'effigy' }),
+    ...Object.entries(STUFFS).map(([k, c]) => card({ label: t().effigy, pic: null, name: t().stuffs[k], color: c, pressed: state.effigy === k, onclick: () => setEffigy(k), kind: 'effigy' }))), pose));
+}
 
 // ---------------------------------------------------------------- the stage's tools
 // Pause: the hero, his effects and his clock stand still; he still turns.

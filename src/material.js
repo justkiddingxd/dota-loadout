@@ -33,6 +33,19 @@ const TO_SOURCE = new THREE.Matrix3().setFromMatrix4(new THREE.Matrix4().makeRot
 
 // m: a material of hero.json; texture(file, srgb) loads one of its textures, cube(file) a cube map
 // from its strip of faces; time and light are uniforms shared by every material of the scene.
+// An effigy: the hero as a statue of one stuff (the viewer's statue uniforms, uStatue 1): his colours'
+// lightness only, in the stuff's colour, lit as it shines — metal reflecting the sky and the light,
+// a rim of it at the edges. Glows (additive layers) are not part of a statue.
+const STATUE = (m) => `if (uStatue > 0.5 && uStatueSkip < 0.5) {
+  ${m.additive ? 'discard;' : ''}
+  float heroTone = clamp(pow(dot(heroBase, vec3(0.2126, 0.7152, 0.0722)), 0.7) * 1.9, 0.18, 1.2);
+  float heroEdge = pow(1.0 - clamp(dot(normal, heroV), 0.0, 1.0), 3.0);
+  vec3 heroSky = mix(uShadowColor + uAmbientColor, uLightColor, clamp(dot(heroR, uUp) * 0.5 + 0.5, 0.0, 1.0));
+  outgoingLight = uStatueColor * heroTone * (heroDiffuse * (1.0 - uStatueMetal * 0.7) + heroSky * uStatueMetal * 0.6)
+    + clamp(heroNL, 0.0, 1.0) * heroShadow * pow(max(dot(uLightDir, heroR), 0.001), uStatueGloss) * uLightColor * uStatueShine * mix(vec3(1.0), uStatueColor, uStatueMetal)
+    + uStatueRim * heroEdge;
+}`;
+
 export function heroMaterial(m, texture, time, light, cube = null) {
   const material = new THREE.MeshPhongMaterial({
     map: m.color ? texture(m.color, true) : null, normalMap: m.normal ? texture(m.normal) : null,
@@ -56,6 +69,8 @@ export function heroMaterial(m, texture, time, light, cube = null) {
     uSpecExponent: { value: m.specExponent ?? 16 }, uSpecScale: { value: m.specScale ?? 1 },
     tDiffuseWarp: { value: m.diffuseWarp ? texture(m.diffuseWarp) : BLACK }, uDiffuseWarp: { value: m.diffuseWarp ? 1 : 0 },
     tCube: { value: m.cube && cube ? cube(m.cube) : null }, uCubeScale: { value: m.cubeScale ?? 0 }, uToSource: { value: TO_SOURCE },
+    // 1: not part of a statue (a pedestal).
+    uStatueSkip: { value: 0 },
   };
   const useCube = !!(m.cube && cube);
   material.userData.hero = uniforms;
@@ -74,7 +89,8 @@ export function heroMaterial(m, texture, time, light, cube = null) {
 #define USE_PACKED_NORMALMAP
 uniform sampler2D tMasks, tSpec, tDetail, tFresnel, tDiffuseWarp; uniform float uTime, uDetailBlend, uSpecExponent, uSpecScale, uDiffuseWarp, uCubeScale; uniform vec2 uDetailScale, uDetailScroll;
 uniform mat3 uToSource;${useCube ? '\nuniform samplerCube tCube;' : ''}
-uniform vec3 uRimColor, uSpecColor, uDetailTint, uLightDir, uLightColor, uAmbientDir, uAmbientColor, uAmbientTint, uShadowColor, uUp;`)
+uniform vec3 uRimColor, uSpecColor, uDetailTint, uLightDir, uLightColor, uAmbientDir, uAmbientColor, uAmbientTint, uShadowColor, uUp;
+uniform float uStatue, uStatueMetal, uStatueGloss, uStatueShine, uStatueSkip; uniform vec3 uStatueColor, uStatueRim;`)
       .replace('#include <opaque_fragment>', `${m.color ? '' : 'vec2 vMapUv = vec2(0.0);'}
 vec4 heroMasks = texture2D(tMasks, vMapUv), heroSpec = texture2D(tSpec, vMapUv), heroDetailTex = texture2D(tDetail, vMapUv * uDetailScale + fract(uDetailScroll * uTime));
 vec3 heroBase = diffuseColor.rgb, heroV = normalize(vViewPosition), heroR = reflect(-heroV, normal);
@@ -93,6 +109,7 @@ vec3 heroSpecular = clamp(heroNL, 0.0, 1.0) * pow(max(dot(uLightDir, heroR), 0.0
 vec3 heroLit = mix(heroAlbedo * heroDiffuse + heroSpecular, heroSpecular, heroSpec.g) + heroMasks.b * uRimColor * uAmbientTint * max(dot(normal, uUp), 0.0) * heroWarp.r;
 ${useCube ? `heroLit += textureCube(tCube, uToSource * inverseTransformDirection(heroR, viewMatrix)).rgb * uCubeScale * ${m.cubeByMetalness ? 'heroSpec.g' : 'heroSpec.r * mix(heroWarp.b, 1.0, heroSpec.g)'} * mix(vec3(1.0), heroBase, max(heroSpec.b, heroSpec.g));` : ''}
 ${DETAIL_OUT[m.detailMode] ?? 'outgoingLight = mix(heroLit, heroAlbedo, clamp(heroDetailTex.a * heroDetail + heroMasks.g, 0.0, 1.0));'}
+${STATUE(m)}
 #include <opaque_fragment>`);
   };
   return material;
