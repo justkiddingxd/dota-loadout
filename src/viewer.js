@@ -97,7 +97,10 @@ void main() {
     this.applyLighting(manifest.lighting || DEFAULT_LIGHTING, hero);
     this.turn.angle = this.turn.target = this.turn.velocity = 0; this.view.zoom = this.view.zoomTarget = 1;
     this.fit();
-    return { name: manifest.name, animations: hero.animations };
+    // Each kinetic gem with the activities it changes (those of the variants with its modifiers).
+    const variants = manifest.animations?.variants || [];
+    const kinetic = (manifest.kinetic || []).map((k) => ({ ...k, changes: [...new Set(variants.filter((v) => v.modifiers.some((m) => k.activities.some(([, km]) => km === m))).map((v) => v.activity))] }));
+    return { name: manifest.name, animations: hero.animations, kinetic };
   }
   // Dresses the hero: an item folder's address (with item.json inside), or { manifest, url } for
   // bundlers, on one of his slots in one of its styles; null puts the slot's default back.
@@ -113,6 +116,9 @@ void main() {
   gem(slot, hex) { this.hero?.gem(slot, hex); }
   // An unusual effect on what a slot wears: its id (the item's unusual list), or null.
   unusual(slot, id) { this.hero?.unusual(slot, id); }
+  // A kinetic gem in what a slot wears: its activities ([[activity, modifier]], from the manifest's
+  // kinetic list), or null; the hero's animations take its modifiers.
+  kinetic(slot, activities) { this.hero?.kinetic(slot, activities); }
   unload() { if (!this.hero) return; this.scene.remove(this.hero.lib.group, this.hero.turntable); this.hero.dispose(); this.hero = null; }
 
   get animations() { return this.hero?.animations || []; }
@@ -333,6 +339,7 @@ async function buildHero(manifest, url, manager, time, light, textureScale = 1) 
   // does; none matching, the plain one. modifiers: [activity or ALL, tag] of all that is worn.
   const variants = (a.variants || []).filter((x) => clips.has(x.name)), activityOf = new Map([...list, ...variants].map((x) => [x.name, x.activity]));
   let modifiers = [];
+  const kinetics = new Map();
   const pick = (name) => {
     const act = activityOf.get(name); if (!act) return name;
     const tags = new Set(modifiers.filter(([at]) => at === 'ALL' || at === act).map(([, tag]) => tag));
@@ -353,7 +360,7 @@ async function buildHero(manifest, url, manager, time, light, textureScale = 1) 
   mixer.addEventListener('finished', (e) => { if (e.action === current && idle && currentBase !== idleName) start(idleName, 0.3); });
   // The modifiers of what each slot wears now; the animation playing changes to its variant.
   const remodify = () => {
-    modifiers = [...(a.defaults?.hero || []), ...[...worn].flatMap(([slot, w]) => (w.item ? w.style.activities || [] : a.defaults?.[slot] || []))];
+    modifiers = [...(a.defaults?.hero || []), ...[...worn].flatMap(([slot, w]) => (w.item ? w.style.activities || [] : a.defaults?.[slot] || [])), ...[...kinetics.values()].flat()];
     if (current?.isRunning() && pick(currentBase) !== currentName) start(currentBase, 0.2);
   };
   remodify();
@@ -574,6 +581,9 @@ async function buildHero(manifest, url, manager, time, light, textureScale = 1) 
     get gems() { return Object.fromEntries([...gems].map(([slot, g]) => [slot, `#${((g.r << 16) | (g.g << 8) | g.b).toString(16).padStart(6, '0')}`])); },
     // An unusual effect on a slot's item (an id of its manifest's unusual list, or null to take it off).
     unusual(slot, id) { if (id == null) unusuals.delete(slot); else unusuals.set(slot, +id); ambient(); },
+    kinetic(slot, activities) { if (activities?.length) kinetics.set(slot, activities); else kinetics.delete(slot); remodify(); },
+    // The sequence playing now (an animation's, or the variant the worn items and gems pick).
+    get sequence() { return currentName; },
     get unusuals() { return Object.fromEntries(unusuals); },
     // The meshes a slot wears now (for checks and tools).
     slotMeshes: (slot) => worn.get(slot)?.meshes || [],

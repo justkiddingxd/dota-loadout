@@ -5,7 +5,7 @@ const T = {
     heroes: 'Герои', items: 'Предметы', sets: 'Сеты', all: 'Все', search: 'Найти героя', findItem: 'Найти предмет', findSet: 'Найти сет', allRarities: 'Все',
     attrs: { str: 'Сила', agi: 'Ловкость', int: 'Интеллект', all: 'Универсал' }, short: { str: 'STR', agi: 'AGI', int: 'INT', all: 'UNI' },
     saveFrame: 'Кадр', saveVideo: 'Видео', stop: 'Стоп', pause: 'Пауза', play: 'Пуск', recenter: 'Вид', share: 'Ссылка', shared: 'Ссылка скопирована', embed: 'Встроить', copy: 'Копировать', copied: 'Скопировано',
-    saved: 'Сохранено', noVideo: 'Браузер не умеет записывать видео', reset: 'Сбросить', worn: 'Надето', defaultItem: 'Стандарт', styles: 'стил.', style: 'Стиль', unusual: 'Необычный эффект', noUnusual: 'Нет',
+    saved: 'Сохранено', noVideo: 'Браузер не умеет записывать видео', reset: 'Сбросить', worn: 'Надето', defaultItem: 'Стандарт', styles: 'стил.', style: 'Стиль', unusual: 'Необычный эффект', noUnusual: 'Нет', kinetic: 'Кинетический самоцвет', kineticTip: 'меняет анимации',
     gem: 'Призматический самоцвет', gemCard: 'Самоцвет', gemTab: 'Самоцвет', noGem: 'Без самоцвета', itemsN: 'предм.', noItems: 'Ничего не нашлось', nothing: 'Никого не нашлось',
     loading: 'Загрузка', failed: 'Не удалось загрузить героя', animation: 'Анимация',
     embedTitle: 'Встроить героя', embedText: 'Рендерер — обычный ES-модуль поверх three.js. Положи папку героя рядом со страницей и подключи:',
@@ -17,7 +17,7 @@ const T = {
     heroes: 'Heroes', items: 'Items', sets: 'Sets', all: 'All', search: 'Find a hero', findItem: 'Find an item', findSet: 'Find a set', allRarities: 'All',
     attrs: { str: 'Strength', agi: 'Agility', int: 'Intelligence', all: 'Universal' }, short: { str: 'STR', agi: 'AGI', int: 'INT', all: 'UNI' },
     saveFrame: 'Save frame', saveVideo: 'Save video', stop: 'Stop', pause: 'Pause', play: 'Play', recenter: 'Recenter', share: 'Link', shared: 'Link copied', embed: 'Embed', copy: 'Copy', copied: 'Copied',
-    saved: 'Saved', noVideo: 'This browser cannot record video', reset: 'Reset', worn: 'Worn', defaultItem: 'Default', styles: 'styles', style: 'Style', unusual: 'Unusual effect', noUnusual: 'None',
+    saved: 'Saved', noVideo: 'This browser cannot record video', reset: 'Reset', worn: 'Worn', defaultItem: 'Default', styles: 'styles', style: 'Style', unusual: 'Unusual effect', noUnusual: 'None', kinetic: 'Kinetic gem', kineticTip: 'changes animations',
     gem: 'Prismatic gem', gemCard: 'Prismatic gem', gemTab: 'Gem', noGem: 'No gem', itemsN: 'items', noItems: 'Nothing found', nothing: 'Nobody by that name',
     loading: 'Loading', failed: 'Could not load the hero', animation: 'Animation',
     embedTitle: 'Embed a hero', embedText: 'The renderer is a plain ES module on top of three.js. Put a hero’s folder next to your page and:',
@@ -34,7 +34,7 @@ let lang = stored || (/^(ru|uk|be|kk)/i.test(navigator.language) ? 'ru' : 'en');
 const t = () => T[lang];
 
 // mode: the shelf's items or sets; tab: its slot ('#all' for every slot); rarity, itemQuery: its filters.
-const state = { gems: {}, unusual: {}, palette: [], index: null, heroes: [], current: null, filter: new Set(), query: '', active: null, catalog: null, worn: {}, mode: 'items', tab: '#all', rarity: null, itemQuery: '' };
+const state = { gems: {}, unusual: {}, kinetic: {}, kinetics: [], palette: [], index: null, heroes: [], current: null, filter: new Set(), query: '', active: null, catalog: null, worn: {}, mode: 'items', tab: '#all', rarity: null, itemQuery: '' };
 
 // ---------------------------------------------------------------- viewer
 const canvas = $('[data-view]');
@@ -153,6 +153,7 @@ async function open(id) {
     const asked = parseHash(); state.worn = valid(asked.worn);
     state.gems = Object.fromEntries(Object.entries(asked.gems).map(([slot, g]) => [slotNow(asked.worn, slot), g]).filter(([slot]) => state.worn[slot]));
     state.unusual = Object.fromEntries(Object.entries(asked.unusual).map(([slot, u]) => [slotNow(asked.worn, slot), u]).filter(([slot]) => state.worn[slot]));
+    state.kinetic = Object.fromEntries(Object.entries(asked.kinetic).map(([slot, k]) => [slotNow(asked.worn, slot), k]).filter(([slot]) => state.worn[slot]));
     await reload(ticket);
   } catch (e) {
     if (ticket !== loads) return;
@@ -174,22 +175,22 @@ async function reload(ticket = ++loads) {
   }
   if (ticket !== loads || !loaded) return;
   $('[data-status]').hidden = true;
-  state.animations = loaded.animations; renderHero(h); mark(idleOf(h));
+  state.animations = loaded.animations; state.kinetics = loaded.kinetic || []; renderHero(h); mark(idleOf(h));
   writeHash(); renderShelf();
   await Promise.all(Object.entries(state.worn).filter(([slot, w]) => w && applies(slot)).map(([slot, [id, style]]) => viewer.wear(slot, `items/${id}/`, style).catch((e) => console.error(e))));
-  applyGems(); applyUnusual();
+  applyGems(); applyUnusual(); applyKinetic();
 }
 
 // ---------------------------------------------------------------- wardrobe
 // The address keeps the hero and what he wears: #juggernaut/weapon=6058.1,head=7413 (item.style),
-// a prismatic gem in an item, and its unusual effect: arms=29087~creators_light!837.
+// a prismatic gem in an item, its unusual effect and its kinetic gem: arms=29087~creators_light!837^31.
 function parseHash() {
-  const [id, rest = ''] = decodeURIComponent(location.hash.slice(1)).split('/'), worn = {}, gems = {}, unusual = {};
-  for (const part of rest.split(',')) { const m = /^(\w+)=(\d+)(?:\.(\d+))?(?:~(\w+))?(?:!(\d+))?$/.exec(part); if (m) { worn[m[1]] = [+m[2], +(m[3] || 0)]; if (m[4]) gems[m[1]] = m[4]; if (m[5]) unusual[m[1]] = +m[5]; } }
-  return { id, worn, gems, unusual };
+  const [id, rest = ''] = decodeURIComponent(location.hash.slice(1)).split('/'), worn = {}, gems = {}, unusual = {}, kinetic = {};
+  for (const part of rest.split(',')) { const m = /^(\w+)=(\d+)(?:\.(\d+))?(?:~(\w+))?(?:!(\d+))?(?:\^(\d+))?$/.exec(part); if (m) { worn[m[1]] = [+m[2], +(m[3] || 0)]; if (m[4]) gems[m[1]] = m[4]; if (m[5]) unusual[m[1]] = +m[5]; if (m[6]) kinetic[m[1]] = +m[6]; } }
+  return { id, worn, gems, unusual, kinetic };
 }
 function writeHash() {
-  const parts = Object.entries(state.worn).filter(([, w]) => w).map(([slot, [id, style]]) => `${slot}=${id}${style ? `.${style}` : ''}${state.gems[slot] ? `~${state.gems[slot]}` : ''}${state.unusual[slot] ? `!${state.unusual[slot]}` : ''}`);
+  const parts = Object.entries(state.worn).filter(([, w]) => w).map(([slot, [id, style]]) => `${slot}=${id}${style ? `.${style}` : ''}${state.gems[slot] ? `~${state.gems[slot]}` : ''}${state.unusual[slot] ? `!${state.unusual[slot]}` : ''}${state.kinetic[slot] != null ? `^${state.kinetic[slot]}` : ''}`);
   history.replaceState(null, '', `#${state.current.id}${parts.length ? `/${parts.join(',')}` : ''}`);
 }
 const RARITY = { common: '#b0c3d9', uncommon: '#5e98d9', rare: '#4b69ff', mythical: '#8847ff', legendary: '#d32ce6', immortal: '#e4ae39', arcana: '#ade55c', ancient: '#eb4b4b', seasonal: '#fff34f' };
@@ -267,13 +268,24 @@ function setUnusual(slot, id) {
   if (id && unusualsOf(slot).some((u) => u.id === id)) state.unusual[slot] = id; else delete state.unusual[slot];
   viewer.unusual(slot, state.unusual[slot] ?? null); writeHash(); renderShelf();
 }
+// An activity's name as the animations menu has it (ACT_DOTA_ATTACK: Атака).
+const actName = (act) => { const a = act.replace(/^ACT_DOTA_/, ''), cast = /^CAST_ABILITY_(\d)$/.exec(a), ab = cast && state.current?.abilities[+cast[1] - 1];
+  return (ab && (ab.name[lang] || ab.name.en)) || t().acts[a] || a.split('_').map((w) => w.charAt(0) + w.slice(1).toLowerCase()).join(' '); };
+// Kinetic gems: those of the hero's animations (his manifest's list), one in any item of his.
+const takesKinetic = (slot) => { const w = state.worn[slot], it = w && state.catalog?.items[w[0]]; return !!(it && !it.default && state.kinetics.length); };
+const kineticOf = (id) => state.kinetics.find((k) => k.id === id) || null;
+function setKinetic(slot, id) {
+  if (id != null && takesKinetic(slot) && kineticOf(id)) state.kinetic[slot] = id; else delete state.kinetic[slot];
+  viewer.kinetic(slot, kineticOf(state.kinetic[slot])?.activities || null); writeHash(); renderShelf();
+}
+const applyKinetic = () => { for (const slot of Object.keys(state.kinetic)) if (takesKinetic(slot) && applies(slot) && kineticOf(state.kinetic[slot])) viewer.kinetic(slot, kineticOf(state.kinetic[slot]).activities); else delete state.kinetic[slot]; };
 const applyUnusual = () => { for (const slot of Object.keys(state.unusual)) if (applies(slot) && unusualsOf(slot).some((u) => u.id === state.unusual[slot])) viewer.unusual(slot, state.unusual[slot]); else delete state.unusual[slot]; };
 
 // Puts an item on (null or a default: the hero's own) and remembers it in the address.
 async function wear(slot, id, style = 0) {
   const it = id && state.catalog?.items[id];
   // A gem stays in the item it was put in; another item comes without.
-  if (state.worn[slot]?.[0] !== +id) { delete state.gems[slot]; viewer.gem(slot, null); delete state.unusual[slot]; viewer.unusual(slot, null); }
+  if (state.worn[slot]?.[0] !== +id) { delete state.gems[slot]; viewer.gem(slot, null); delete state.unusual[slot]; viewer.unusual(slot, null); delete state.kinetic[slot]; viewer.kinetic(slot, null); }
   state.worn[slot] = it && !it.default ? [+id, style] : null;
   if (formOf(state.worn) !== state.form) return reload();
   writeHash(); renderShelf();
@@ -311,7 +323,7 @@ function renderShelf() {
   if (state.tab !== '#all' && !slots.some((s) => s.name === state.tab) && !(state.tab === '#gem' && gemSlots.length && state.palette.length)) state.tab = '#all';
   const changed = Object.values(state.worn).some(Boolean);
   tabs.hidden = state.mode !== 'items';
-  const reset = el('button', { type: 'button', className: 'tab', textContent: `↺ ${t().reset}` }); reset.onclick = () => { state.worn = {}; state.gems = {}; state.unusual = {}; reload(); };
+  const reset = el('button', { type: 'button', className: 'tab', textContent: `↺ ${t().reset}` }); reset.onclick = () => { state.worn = {}; state.gems = {}; state.unusual = {}; state.kinetic = {}; reload(); };
   const gemTab = gemSlots.length && state.palette.length ? [tab('#gem', t().gemTab, gemHex(gemOf(gemSlots[0].name)) || '#fff')] : [];
   tabs.replaceChildren(tab('#all', t().all), ...gemTab, ...slots.map((s) => { const w = state.worn[s.name], it = w && c.items[w[0]]; return tab(s.name, slotName(s), it && RARITY[it.rarity]); }), ...(changed ? [reset] : []));
   const q = state.itemQuery.trim().toLowerCase();
@@ -332,6 +344,7 @@ function renderShelf() {
     if (state.tab === s.name && it && it.styles.length > 1) parts.push(section(t().style, null, chips(it.styles.map((st, i) => [st.name?.[lang] || st.name?.en || String(i + 1), i === style, () => wear(s.name, id, i)]))));
     const rolls = unusualsOf(s.name);
     if (state.tab === s.name && rolls.length) { const now = state.unusual[s.name] ?? null; parts.push(section(t().unusual, null, chips([[t().noUnusual, now === null, () => setUnusual(s.name, null)], ...rolls.map((u) => [u.name[lang] || u.name.en, u.id === now, () => setUnusual(s.name, u.id)])]))); }
+    if (state.tab === s.name && takesKinetic(s.name)) { const now = state.kinetic[s.name] ?? null; parts.push(section(t().kinetic, t().kineticTip, chips([[t().noUnusual, now === null, () => setKinetic(s.name, null)], ...state.kinetics.map((k) => [`${k.name[lang] || k.name.en}${k.changes?.length ? ` · ${k.changes.map(actName).join(', ')}` : ''}`, k.id === now, () => setKinetic(s.name, k.id)])]))); }
   }
   for (const s of shown) {
     const ids = s.items.filter((id) => (!q || itemName(c.items[id]).toLowerCase().includes(q)) && (!state.rarity || c.items[id].rarity === state.rarity));
@@ -370,6 +383,7 @@ function itemCard(s, id) {
   const it = state.catalog.items[id], worn = shownIn(s.name) === id, style = worn ? state.worn[s.name]?.[1] || 0 : 0;
   const marks = [];
   if (worn && state.unusual[s.name]) marks.push(el('i', { title: t().unusual }));
+  if (worn && state.kinetic[s.name] != null) { const m = el('i', { title: t().kinetic }); m.style.setProperty('--g', '#f0a43c'); marks.push(m); }
   if (worn && gemOf(s.name)) { const m = el('i', { title: t().gem }); m.style.setProperty('--g', gemHex(gemOf(s.name))); marks.push(m); }
   return card({
     label: it.default ? t().defaultItem : state.tab === '#all' ? rarityName(it.rarity) : `${rarityName(it.rarity)} · ${slotName(s)}`,
@@ -459,12 +473,13 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'ArrowRight') viewer.rotate(0.6, { relative: true });
 });
 window.addEventListener('hashchange', () => {
-  const { id, worn, gems: g0, unusual: u0 } = parseHash(); if (id !== state.current?.id) return open(id);
-  const moved = (o) => Object.fromEntries(Object.entries(o).map(([slot, v]) => [slotNow(worn, slot), v])), gems = moved(g0), unusual = moved(u0);
+  const { id, worn, gems: g0, unusual: u0, kinetic: k0 } = parseHash(); if (id !== state.current?.id) return open(id);
+  const moved = (o) => Object.fromEntries(Object.entries(o).map(([slot, v]) => [slotNow(worn, slot), v])), gems = moved(g0), unusual = moved(u0), kinetic = moved(k0);
   dress(worn);
   // The gems it names, in the items it names (those still loading take theirs when they are on).
   for (const slot of new Set([...Object.keys(state.gems), ...Object.keys(gems)])) { if (gems[slot] && state.worn[slot]) state.gems[slot] = gems[slot]; else delete state.gems[slot]; viewer.gem(slot, gemHex(gemOf(slot))); }
   for (const slot of new Set([...Object.keys(state.unusual), ...Object.keys(unusual)])) { if (unusual[slot] && state.worn[slot]) state.unusual[slot] = unusual[slot]; else delete state.unusual[slot]; viewer.unusual(slot, state.unusual[slot] ?? null); }
+  for (const slot of new Set([...Object.keys(state.kinetic), ...Object.keys(kinetic)])) { if (kinetic[slot] != null && state.worn[slot]) state.kinetic[slot] = kinetic[slot]; else delete state.kinetic[slot]; viewer.kinetic(slot, kineticOf(state.kinetic[slot])?.activities || null); }
   writeHash(); renderShelf();
 });
 

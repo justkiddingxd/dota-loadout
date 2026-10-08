@@ -35,6 +35,13 @@ export function loadGame(game) {
     for (const npc of Object.keys(item.used_by_heroes)) (defaults[npc] ||= []).push({ id: +id, ...item });
   }
 
+  // Kinetic gems: the schema's named activity modifiers (asset_modifiers, «Kinetic: Pounce of the Silent
+  // Ripper»), any hero's whose animations know them; their variants are picked for every hero.
+  const kinetic = Object.entries(itemsGame.asset_modifiers || {}).map(([id, e]) => ({ id: +id, key: e.name, name: { en: text(e.loc_key, 'en') || e.name, ru: text(e.loc_key, 'ru') || text(e.loc_key, 'en') || e.name },
+    activities: Object.values(e).filter((m) => m && typeof m === 'object' && m.type === 'activity' && m.modifier).map((m) => [m.asset || 'ALL', m.modifier]) }))
+    .filter((k) => /^#?DOTA_Anim_Mod_/i.test(itemsGame.asset_modifiers[k.id]?.loc_key || '') && k.activities.length);
+  const kineticTags = kinetic.flatMap((k) => k.activities.map(([, m]) => m));
+
   const heroes = [];
   for (const npc of roster) {
     if (HIDDEN.has(npc) || !existsSync(join(game, `scripts/npc/heroes/${npc}.txt`))) continue;
@@ -98,7 +105,7 @@ export function loadGame(game) {
       roles: (h.Role || '').split(',').filter(Boolean), complexity: +(h.Complexity ?? 0), name,
       hype: { en: text(`${npc}_hype`, 'en'), ru: text(`${npc}_hype`, 'ru') },
       abilities: abilities.map((a) => ({ id: a, name: { en: text(`DOTA_Tooltip_ability_${a}`, 'en'), ru: text(`DOTA_Tooltip_ability_${a}`, 'ru') } })),
-      wearables, effects, replace, lighting, pedestal: p.PortraitBackgroundModel || null, activityTags: [...(tags[npc] || [])], activities, forms,
+      wearables, effects, replace, lighting, pedestal: p.PortraitBackgroundModel || null, activityTags: [...new Set([...(tags[npc] || []), ...kineticTags])], kinetic, activities, forms,
     });
   }
   return { heroes };

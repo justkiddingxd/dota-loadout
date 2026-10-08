@@ -44,7 +44,9 @@ export async function buildHero({ game, cli, hero, out, temp, log = () => {} }) 
   if (hero.pedestal && has(hero.pedestal)) MODELS.pedestal = hero.pedestal;
   if (!has(hero.model)) throw new Error(`no ${hero.model}`);
   const heroDump = await run(['-i', join(game, `${hero.model}_c`), '-a']);
-  const animations = pickAnimations(sequences(heroDump), 24, hero.activityTags || []);
+  const seqs = sequences(heroDump), animations = pickAnimations(seqs, 24, hero.activityTags || []);
+  // The kinetic gems that change an animation he shows: one of those with one of their modifiers.
+  const known = new Set([...animations.list, ...animations.variants].flatMap((s) => s.modifiers || [])), kinetic = (hero.kinetic || []).filter((k) => k.activities.some(([, m]) => known.has(m)));
   const wanted = [...new Set([animations.entry, animations.idle, ...animations.list.map((a) => a.name), ...animations.variants.map((a) => a.name)].filter(Boolean))];
 
   // Props of those animations, one model file each, with the clips the events ask for: the sequence
@@ -82,6 +84,7 @@ export async function buildHero({ game, cli, hero, out, temp, log = () => {} }) 
     fxModels: Object.fromEntries(Object.entries(fxModels).filter(([, fx]) => fxFiles[fx.name]).map(([path, fx]) => [path, { file: fxFiles[fx.name], clips: fx.clips }])),
     ...(Object.keys(replace).length ? { replace: Object.fromEntries(Object.entries(replace).map(([slot, r]) => [slot, Object.fromEntries(Object.entries(r).filter(([, to]) => systems[to]))])) } : {}),
     systems, textures, snapshots, attachments, ...(Object.keys(skins).length ? { skins } : {}),
+    ...(kinetic.length ? { kinetic: kinetic.map(({ id, name, activities }) => ({ id, name, activities })) } : {}),
   };
   writeFileSync(join(out, 'hero.json'), JSON.stringify(manifest));
   // Last, once the snapshots were fitted to the plain models: pack the models.
