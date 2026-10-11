@@ -39,7 +39,7 @@ const state = { gems: {}, unusual: {}, kinetic: {}, kinetics: [], palette: [], i
 // ---------------------------------------------------------------- viewer
 const canvas = $('[data-view]');
 const viewer = new HeroViewer(canvas, {
-  assets: new URL('./', location.href).href,
+  assets: new URL('./', document.baseURI).href,
   onProgress: (loaded, total) => { $('[data-bar]').style.width = `${total ? Math.round((loaded / total) * 100) : 0}%`; },
 });
 globalThis.__loadout = viewer; // for poking at the scene from the console
@@ -78,7 +78,7 @@ function renderList() {
 }
 const ATTR_COLOR = { str: '#e0533d', agi: '#4fc26b', int: '#3fa7e8', all: '#c6a24f' };
 function heroCard(h) {
-  const a = el('a', { className: 'card', href: `#${h.id}` },
+  const a = el('a', { className: 'card', href: `${location.pathname}${location.search}#${h.id}` },
     el('span', { className: 'label' }, el('img', { src: `attributes/${h.attribute}.webp`, alt: '' }), t().attrs[h.attribute]),
     el('span', { className: 'pic' }, el('img', { src: `heroes/${h.id}/card.webp`, alt: '', loading: 'lazy' })), el('b', { textContent: nameOf(h) }));
   a.style.setProperty('--c', ATTR_COLOR[h.attribute]); a.dataset.id = h.id;
@@ -104,6 +104,8 @@ function label(h, a) {
 function renderHero(h) {
   document.title = `${nameOf(h)} — Loadout`;
   $('[data-hero-name]').textContent = nameOf(h); $('[data-hero-icon]').src = `heroes/${h.id}/icon.webp`;
+  // For the page's styles: who stands there (his name, his attribute).
+  Object.assign($('[data-stage]').dataset, { hero: h.id, name: nameOf(h), attr: h.attribute });
   $('[data-anims]').replaceChildren(...animsOf(h).map((a) => {
     const [text, sub] = label(h, a), b = el('button', { type: 'button', role: 'menuitem' }, text, sub ? el('small', { textContent: sub }) : null, el('i'));
     b.dataset.name = a.name; b.onclick = () => { play(a.name); closeMenu(); }; return el('li', {}, b);
@@ -194,7 +196,14 @@ function parseHash() {
 }
 function writeHash() {
   const parts = Object.entries({ ...state.worn, ...state.pets }).filter(([, w]) => w).map(([slot, [id, style]]) => `${slot}=${id}${style ? `.${style}` : ''}${state.gems[slot] ? `~${state.gems[slot]}` : ''}${state.unusual[slot] ? `!${state.unusual[slot]}` : ''}${state.kinetic[slot] != null ? `^${state.kinetic[slot]}` : ''}`);
-  history.replaceState(null, '', `#${state.current.id}${parts.length ? `/${parts.join(',')}` : ''}`);
+  history.replaceState(null, '', `${location.pathname}${location.search}#${state.current.id}${parts.length ? `/${parts.join(',')}` : ''}`);
+  renderCaption();
+}
+// A caption of what he wears, for a page that has one ([data-caption]): each slot's item, by name.
+function renderCaption() {
+  const box = $('[data-caption]'), c = state.catalog; if (!box || !c) return;
+  box.replaceChildren(...c.slots.filter((s) => applies(s.name)).map((s) => { const it = c.items[shownIn(s.name)]; return it && !it.default ? el('li', {}, el('span', { textContent: slotName(s) }), el('b', { textContent: itemName(it) })) : null; }).filter(Boolean));
+  box.dataset.count = box.children.length;
 }
 const RARITY = { common: '#b0c3d9', uncommon: '#5e98d9', rare: '#4b69ff', mythical: '#8847ff', legendary: '#d32ce6', immortal: '#e4ae39', arcana: '#ade55c', ancient: '#eb4b4b', seasonal: '#fff34f' };
 // The game's order of rarities, for a set's: its rarest item's.
@@ -351,7 +360,7 @@ function renderShelf() {
   tabs.hidden = state.mode !== 'items';
   const reset = el('button', { type: 'button', className: 'tab', textContent: `↺ ${t().reset}` }); reset.onclick = () => { state.worn = {}; state.gems = {}; state.unusual = {}; state.kinetic = {}; reload(); };
   const gemTab = gemSlots.length && state.palette.length ? [tab('#gem', t().gemTab, gemHex(gemOf(gemSlots[0].name)) || '#fff')] : [];
-  tabs.replaceChildren(tab('#all', t().all), ...gemTab, ...slots.map((s) => { const w = state.worn[s.name], it = w && c.items[w[0]]; return tab(s.name, slotName(s), it && RARITY[it.rarity]); }), ...(changed ? [reset] : []));
+  tabs.replaceChildren(tab('#all', t().all), ...gemTab, ...slots.map((s) => { const w = state.worn[s.name], it = w && c.items[w[0]]; return tab(s.name, slotName(s), it && RARITY[it.rarity], iconOf(shownIn(s.name), w?.[1] || 0)); }), ...(changed ? [reset] : []));
   const q = state.itemQuery.trim().toLowerCase();
   if (state.mode === 'sets') {
     const rarityOf = (set) => set.items.map((id) => c.items[id].rarity).sort((a, b) => RANK.indexOf(b) - RANK.indexOf(a))[0] || 'common';
@@ -383,8 +392,10 @@ function renderShelf() {
   }
   body.replaceChildren(...(parts.length ? parts : [el('p', { className: 'empty', textContent: t().noItems })]));
 }
-function tab(name, text, color) {
-  const b = el('button', { type: 'button', className: 'tab', role: 'tab', textContent: text });
+// A slot's tab carries what it shows now (--icon), for pages that draw it.
+function tab(name, text, color, icon) {
+  const b = el('button', { type: 'button', className: 'tab', role: 'tab', textContent: text }); b.dataset.slot = name;
+  if (icon) b.style.setProperty('--icon', `url("${new URL(icon, document.baseURI).href}")`);
   if (color) { const d = el('i', { className: 'dot' }); d.style.setProperty('--c', color); b.append(d); }
   b.setAttribute('aria-selected', state.tab === name); b.onclick = () => setTab(name); return b;
 }
@@ -472,7 +483,7 @@ function backdropCards() {
   return el('div', {}, section(t().screens, String(screens.length), el('div', { className: 'cards backdrops' }, ...screens.map((b) => cardOf(b, t().screen)))), section(t().scenes, null, scenes));
 }
 fetch('backgrounds/index.json').then((r) => (r.ok ? r.json() : { backgrounds: [] })).then((d) => {
-  backdrop.list = (d.backgrounds || []).map((b) => ({ ...b, url: `backgrounds/${b.file}` })); setBackdrop(savedBackdrop === 'none' ? null : savedBackdrop || 'dashboard', false);
+  backdrop.list = (d.backgrounds || []).map((b) => ({ ...b, url: `backgrounds/${b.file}` })); setBackdrop(savedBackdrop === 'none' ? null : savedBackdrop || document.documentElement.dataset.backdrop || 'dashboard', false);
 }).catch(() => {});
 
 // ---------------------------------------------------------------- couriers and wards

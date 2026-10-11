@@ -8,7 +8,7 @@ npx vite build --config vite.config.mjs
 mkdir -p "$TARGET"
 # Heroes first, the page last: a visitor never gets a page whose heroes are not there yet. The .gz
 # files beside them are this script's own (below), not the build's to delete.
-rsync -a --delete --exclude index.html --exclude '*.gz' dist/ "$TARGET/"
+rsync -a --delete --exclude index.html --exclude '*.gz' --exclude /design/ dist/ "$TARGET/"
 # A .gz beside each model and data file that is newer than its own (nginx's gzip_static sends it
 # instead: a model a fifth of its size); those whose file is gone go too.
 find "$TARGET" -type f \( -name '*.glb' -o -name '*.json' -o -name '*.js' -o -name '*.css' \) -print0 |

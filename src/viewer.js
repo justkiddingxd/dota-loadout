@@ -262,7 +262,7 @@ void main() {
 }
 
 async function fetchJson(base, file) {
-  const root = base.endsWith('/') ? base : `${base}/`, href = new URL(root, globalThis.location?.href).href;
+  const root = base.endsWith('/') ? base : `${base}/`, href = new URL(root, globalThis.document?.baseURI ?? globalThis.location?.href).href;
   const response = await fetch(`${href}${file}`); if (!response.ok) throw new Error(`${href}${file}: ${response.status}`);
   return { manifest: await response.json(), url: (path) => href + path };
 }
