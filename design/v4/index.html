@@ -3,91 +3,29 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <base href="/">
-  <title>Loadout — Draft</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Crect width=%2732%27 height=%2732%27 rx=%277%27 fill=%27%2308090a%27/%3E%3Cpath d=%27M11 7v18h11%27 fill=%27none%27 stroke=%27%23e8e8ea%27 stroke-width=%273.4%27/%3E%3C/svg%3E">
-  <meta name="theme-color" content="#0d1626">
+  <title>Loadout — Каталог</title>
+  <meta name="theme-color" content="#ffffff">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Saira:ital,wdth,wght@0,62.5..100,400..800;1,62.5..100,500..800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Wix+Madefor+Display:wght@500;600;700&family=Wix+Madefor+Text:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/design/v4/style.css">
 </head>
-<body class="v4">
-  <div class="picker" data-picker hidden role="dialog" aria-modal="true" aria-label="Герои">
-    <div class="picker-inner">
-      <header class="picker-head">
-        <label class="search"><input type="search" autocomplete="off" spellcheck="false" data-search></label>
-        <div class="attrs" role="group" data-attrs></div>
-        <button class="btn close" type="button" data-close-picker aria-label="Закрыть">×</button>
-      </header>
-      <div class="picker-body" data-list></div>
-    </div>
-  </div>
-  <div class="app">
-    <main class="stage" data-stage>
-      <canvas class="view" data-view></canvas>
-      <div class="status" data-status><div class="progress"><i data-bar></i></div><span data-status-text></span></div>
-      <p class="toast" data-toast></p>
-      <header class="bar top">
-        <div class="hero-line">
-          <button class="step" type="button" data-prev aria-label="Предыдущий герой">‹</button>
-          <img class="hero-icon" data-hero-icon alt="">
-          <h2 data-hero-name></h2>
-          <button class="step" type="button" data-next aria-label="Следующий герой">›</button>
-        </div>
-        <button class="btn pick" type="button" data-open-picker><span data-t="heroes"></span></button>
-        <nav class="head-tools">
-          <button class="btn" type="button" data-reset></button>
-          <a class="btn" href="https://github.com/justkiddingxd/dota-loadout">GitHub</a>
-          <button class="btn" type="button" data-lang-toggle>EN</button>
-        </nav>
-      </header>
-      <footer class="bar bottom">
-        <div class="group capture">
-          <button class="btn" type="button" data-save-frame></button>
-          <button class="btn" type="button" data-save-video></button>
-        </div>
-        <div class="group play">
-          <button class="btn" type="button" data-pause></button>
-          <div class="menu" data-anim-menu>
-            <button class="btn" type="button" data-anim-button aria-haspopup="menu" aria-expanded="false"></button>
-            <ul class="menu-list" role="menu" data-anims hidden></ul>
-          </div>
-        </div>
-        <div class="group share">
-          <button class="btn" type="button" data-share></button>
-          <button class="btn" type="button" data-embed></button>
-        </div>
-      </footer>
-    </main>
-    <aside class="shelf" data-shelf>
-      <header class="shelf-head">
-        <div class="seg" role="tablist" data-mode></div>
-      </header>
-      <nav class="tabs" data-tabs aria-label="Слоты"></nav>
-      <div class="filters">
-        <label class="search"><input type="search" autocomplete="off" spellcheck="false" data-item-search></label>
-        <div class="rarities" data-rarities></div>
-      </div>
-      <div class="shelf-body" data-shelf-body></div>
+<body>
+  <header class="head">
+    <a class="mark" href="/">Loadout</a>
+    <button class="who" type="button" data-who aria-expanded="false"></button>
+    <label class="find"><input type="search" data-q autocomplete="off" spellcheck="false"></label>
+    <button class="share" type="button" data-share></button>
+    <div class="heroes" data-heroes hidden></div>
+  </header>
+  <div class="page">
+    <nav class="filters" data-filters aria-label="Фильтры"></nav>
+    <main class="catalog" data-catalog></main>
+    <aside class="fitting">
+      <div class="view"><canvas data-view></canvas><div class="loading" data-loading hidden><i data-bar></i></div></div>
+      <div class="worn" data-worn></div>
     </aside>
   </div>
-  <dialog class="embed" data-embed-dialog>
-    <form method="dialog">
-      <header><h2 data-t="embedTitle"></h2><button class="btn" value="close" aria-label="Закрыть">×</button></header>
-      <p data-t="embedText"></p>
-      <pre><code data-embed-code></code></pre>
-      <div class="embed-actions"><button class="btn" type="button" data-copy></button></div>
-      <p class="fine" data-t="embedFine"></p>
-    </form>
-  </dialog>
-  <script type="module" src="/site/main.js"></script>
-  <script type="module">
-    // The strip keeps the hero on the stage in sight.
-    const list = document.querySelector('[data-list]');
-    const show = () => list.querySelector('[aria-current="true"]')?.scrollIntoView({ inline: 'center', block: 'nearest', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
-    new MutationObserver(show).observe(list, { subtree: true, childList: true, attributeFilter: ['aria-current'] });
-  </script>
+  <script type="module" src="/design/v4/app.js"></script>
 </body>
 </html>
-
