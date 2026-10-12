@@ -27,3 +27,20 @@ couriers, backdrops, effigies, video come over to the one chosen.
    opens with its worn item large and styles as pictures, and items tried on while hovered.
 9. Sets — sets (or a slot's items) on the left, the hero, the outfit on the right with lines.
 10. Layers — the outfit as layers that open in place, with a line from the open one to its item.
+
+## Third round: after the games' own screens
+
+The brief, clarified: the look, the comfort and the sameness were wrong; the references are Dota 2's
+armory and Valorant's / CS2's collections; v7 and v2 were the closest. Game screens, not web pages:
+the model large in the middle, thin sharp UI on dark glass, framed items with a rarity bar, capitals
+for titles, everything on one screen.
+
+11. Armory — Dota's loadout screen: slots framed down the left, the hero before his own loading
+    screen, the slot's inventory on the right (hover tries on), click a thing on him, a hero grid by
+    attribute. Forum, Fira Sans.
+12. Collection — Valorant's: the hero's name huge behind him, slots as a list, skins on the right;
+    choosing a skin previews it, Equip keeps it, Cancel goes back. Accent: his attribute's colour.
+    Oswald, Roboto Condensed.
+13. Inspect — CS2's: the hero inspected on a grey-blue gradient, slots as categories along the top,
+    the item's name large at the bottom left, cards with rarity bars (hover tries on), the full
+    inventory over everything. Exo 2.
