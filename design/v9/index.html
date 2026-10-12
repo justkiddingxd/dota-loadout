@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Loadout — Наборы</title>
+  <meta name="theme-color" content="#20262c">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Commissioner:wght@400;500;600;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/design/v9/style.css">
+</head>
+<body>
+  <aside class="browse" data-browse></aside>
+  <main class="stage">
+    <canvas data-view></canvas>
+    <div class="loading" data-loading hidden><i data-bar></i></div>
+    <header class="top"><button class="who" type="button" data-who></button><button class="ghost" type="button" data-share></button></header>
+  </main>
+  <svg class="leaders" data-leaders aria-hidden="true"></svg>
+  <nav class="outfit" data-outfit aria-label="Надето"></nav>
+  <dialog class="heroes" data-heroes></dialog>
+  <script type="module" src="/design/v9/app.js"></script>
+</body>
+</html>

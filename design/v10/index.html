@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Loadout — Слои</title>
+  <meta name="theme-color" content="#eef0f3">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600&family=Unbounded:wght@500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/design/v10/style.css">
+</head>
+<body>
+  <aside class="side">
+    <header class="head"><button class="who" type="button" data-who></button><button class="ghost" type="button" data-share></button></header>
+    <div class="layers" data-layers></div>
+  </aside>
+  <main class="stage">
+    <canvas data-view></canvas>
+    <div class="loading" data-loading hidden><i data-bar></i></div>
+    <div class="stage-tools"><div class="anim" data-anim></div></div>
+  </main>
+  <svg class="leaders" data-leaders aria-hidden="true"></svg>
+  <dialog class="heroes" data-heroes></dialog>
+  <script type="module" src="/design/v10/app.js"></script>
+</body>
+</html>
