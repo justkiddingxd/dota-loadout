@@ -1,23 +1,22 @@
-// Collection: as a shooter's collection screen. The hero's name huge over him; his slots as a list on
-// the left; the chosen slot's skins on the right. Choosing a skin shows it on him; Equip keeps it,
-// Cancel puts back what he wore. A thing on him can be clicked to open its slot.
+// Collection: as a shooter's collection screen. The hero's name huge behind him; his slots as a list on
+// the left; the chosen slot's skins on the right. A click on a skin puts it on him, a click on the one
+// he wears takes it off. A thing on him can be clicked to open its slot.
 import { ATTRIBUTE, h, icon, lang, RARITY, rarityName, say, start } from '../kit.js';
 import { shareButton } from '../parts.js';
 
 const $ = (s) => document.querySelector(s);
 const ru = lang === 'ru';
 const T = ru
-  ? { heroes: 'Герои', standard: 'Стандарт', empty: 'Пусто', equip: 'Надеть', equipped: 'Надето', cancel: 'Отмена', preview: 'Просмотр', variants: 'Варианты', find: 'Поиск', none: 'Ничего не нашлось', findHero: 'Найти героя', close: 'Закрыть', skins: (n) => `${n} ${n % 10 === 1 && n % 100 !== 11 ? 'облик' : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20) ? 'облика' : 'обликов'}` }
-  : { heroes: 'Heroes', standard: 'Default', empty: 'Empty', equip: 'Equip', equipped: 'Equipped', cancel: 'Cancel', preview: 'Preview', variants: 'Variants', find: 'Search', none: 'Nothing found', findHero: 'Find a hero', close: 'Close', skins: (n) => `${n} skins` };
+  ? { heroes: 'Герои', standard: 'Стандарт', empty: 'Пусто', off: 'нажмите ещё раз, чтобы снять', variants: 'Варианты', find: 'Поиск', none: 'Ничего не нашлось', findHero: 'Найти героя', close: 'Закрыть', skins: (n) => `${n} ${n % 10 === 1 && n % 100 !== 11 ? 'облик' : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20) ? 'облика' : 'обликов'}` }
+  : { heroes: 'Heroes', standard: 'Default', empty: 'Empty', off: 'click again to take it off', variants: 'Variants', find: 'Search', none: 'Nothing found', findHero: 'Find a hero', close: 'Close', skins: (n) => `${n} skins` };
 const ACCENT = { str: '#e5533d', agi: '#4ec46b', int: '#3fa7e8', all: '#c58cf0' };
-// The skin being looked at (not yet worn): { slot, id, style }.
-const ui = { slot: null, look: null, query: '', line: null };
+const ui = { slot: null, query: '', line: null };
 
 const kit = await start($('[data-view]'), {
   viewer: { framing: 'hero' },
   onProgress: (a, b) => { $('[data-bar]').style.width = `${b ? (a / b) * 100 : 0}%`; },
   onLoading: (on) => { $('[data-loading]').hidden = !on; },
-  onChange: (why) => { if (why === 'hero') { ui.slot = null; ui.query = ''; } ui.look = null; render(); },
+  onChange: (why) => { if (why === 'hero') { ui.slot = null; ui.query = ''; } render(); },
 });
 
 function render() {
@@ -42,52 +41,42 @@ function renderSlots() {
     return b;
   }));
 }
-async function choose(slot) { if (ui.look) await cancel(); ui.slot = slot; ui.query = ''; render(); }
+function choose(slot) { ui.slot = slot; ui.query = ''; render(); }
 
 // ---- over him: his name, and what the slot shows
 function renderTitle() {
   const hero = kit.hero, s = kit.slots().find((x) => x.name === ui.slot);
-  const id = ui.look ? ui.look.id : s && kit.shown(s.name), it = kit.item(id);
+  const id = s && kit.shown(s.name), it = kit.item(id);
   $('[data-title]').replaceChildren(
     h('p', { class: 'attr' }, h('img', { src: `/attributes/${hero.attribute}.webp`, alt: '' }), ATTRIBUTE[lang][hero.attribute]),
     h('h1', {}, say(hero.name)));
-  $('[data-now]').replaceChildren(...(s ? [h('span', { class: 'state' }, ui.look ? T.preview : say(s.text)), h('b', {}, !it ? T.empty : it.default ? T.standard : say(it.name)), it && !it.default ? h('span', { class: 'rar', style: { '--r': RARITY[it.rarity] } }, rarityName(it.rarity)) : null].filter(Boolean) : []));
+  $('[data-now]').replaceChildren(...(s ? [h('span', { class: 'state' }, say(s.text)), h('b', {}, !it ? T.empty : it.default ? T.standard : say(it.name)), it && !it.default ? h('span', { class: 'rar', style: { '--r': RARITY[it.rarity] } }, rarityName(it.rarity)) : null].filter(Boolean) : []));
 }
 
 // ---- right: the skins of the slot, its variants, Equip
 function renderSkins() {
   const box = $('[data-skins]'), s = kit.slots().find((x) => x.name === ui.slot); if (!s) return box.replaceChildren();
-  const worn = kit.shown(s.name), seen = ui.look ? ui.look.id : worn, cur = kit.item(seen), style = ui.look ? ui.look.style : kit.styleOf(s.name);
+  const worn = kit.shown(s.name), cur = kit.item(worn), style = kit.styleOf(s.name);
   const input = h('input', { type: 'search', placeholder: T.find, value: ui.query, 'aria-label': T.find });
   const grid = h('div', { class: 'grid', 'data-grid': '' });
   const fill = () => {
     const q = ui.query.trim().toLowerCase(), ids = s.items.filter((id) => !q || say(kit.item(id).name).toLowerCase().includes(q));
     grid.replaceChildren(...(ids.length ? ids.map((id) => {
       const it = kit.item(id);
-      const b = h('button', { type: 'button', class: 'item', 'aria-pressed': String(id === seen), 'data-worn': String(id === worn), title: it.default ? T.standard : say(it.name), style: { '--r': it.default ? 'transparent' : RARITY[it.rarity] } },
+      const b = h('button', { type: 'button', class: 'item', 'aria-pressed': String(id === worn), title: it.default ? T.standard : id === worn ? `${say(it.name)}: ${T.off}` : say(it.name), style: { '--r': it.default ? 'transparent' : RARITY[it.rarity] } },
         h('img', { src: kit.picture(id), alt: '', loading: 'lazy' }), id === worn ? h('span', { class: 'mark', html: icon('check', 12) }) : null);
-      b.onclick = () => view(s, id, 0); return b;
+      b.onclick = () => toggle(s, id); return b;
     }) : [h('p', { class: 'none' }, T.none)]));
   };
   input.oninput = () => { ui.query = input.value; fill(); }; fill();
   const variants = cur && !cur.default && cur.styles.length > 1
-    ? h('div', { class: 'variants' }, h('h3', {}, T.variants), h('div', {}, ...cur.styles.map((st, i) => { const b = h('button', { type: 'button', 'aria-pressed': String(style === i), title: say(st.name) || String(i + 1) }, h('img', { src: kit.picture(seen, i), alt: say(st.name) || String(i + 1) })); b.onclick = () => view(s, seen, i); return b; })))
+    ? h('div', { class: 'variants' }, h('h3', {}, T.variants), h('div', {}, ...cur.styles.map((st, i) => { const b = h('button', { type: 'button', 'aria-pressed': String(style === i), title: say(st.name) || String(i + 1) }, h('img', { src: kit.picture(worn, i), alt: say(st.name) || String(i + 1) })); b.onclick = () => kit.wear(s.name, worn, i); return b; })))
     : null;
-  const pending = !!ui.look;
-  const equip = h('button', { type: 'button', class: 'equip', disabled: !pending }, pending ? T.equip : T.equipped); equip.onclick = commit;
-  const cancelB = pending ? (() => { const b = h('button', { type: 'button', class: 'cancel' }, T.cancel); b.onclick = cancel; return b; })() : null;
-  box.replaceChildren(...[h('header', {}, h('h2', {}, say(s.text)), h('span', {}, T.skins(s.items.length))), h('label', { class: 'find', html: icon('search', 16) }, input), grid, variants, h('div', { class: 'actions' }, cancelB, equip)].filter(Boolean));
+  box.replaceChildren(...[h('header', {}, h('h2', {}, say(s.text)), h('span', {}, T.skins(s.items.length))), h('label', { class: 'find', html: icon('search', 16) }, input), grid, variants].filter(Boolean));
 }
 
-// Looking is not wearing: the skin goes on him until Equip or Cancel.
-async function view(s, id, style) {
-  const worn = kit.look.worn[s.name], same = (worn ? worn[0] : kit.shown(s.name)) === id && (worn?.[1] || 0) === style;
-  if (same) { if (ui.look) await cancel(); return; }
-  ui.look = { slot: s.name, id, style }; renderTitle(); renderSkins();
-  await kit.tryOn(s.name, id, style);
-}
-async function commit() { const l = ui.look; if (!l) return; ui.look = null; await kit.wear(l.slot, l.id, l.style); }
-async function cancel() { const l = ui.look; ui.look = null; render(); if (l) await kit.untry(l.slot); }
+// A click puts a skin on; on the one he wears (not his own default) it takes it off again.
+function toggle(s, id) { const it = kit.item(id), on = kit.look.worn[s.name]?.[0] === id; return kit.wear(s.name, on || it.default ? null : id, 0); }
 
 // ---- pointing at him
 const canvas = $('[data-view]'), tip = $('[data-tip]');
@@ -130,5 +119,5 @@ function openRoster() {
   roster.replaceChildren(h('header', {}, h('h2', {}, T.heroes), h('label', { class: 'find', html: icon('search', 16) }, input), close), list);
   roster.hidden = false; input.focus();
 }
-addEventListener('keydown', (e) => { if (e.key === 'Escape') { if (!roster.hidden) roster.hidden = true; else if (ui.look) cancel(); } });
+addEventListener('keydown', (e) => { if (e.key === 'Escape') roster.hidden = true; });
 render();
