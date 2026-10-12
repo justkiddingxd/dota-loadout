@@ -419,6 +419,10 @@ async function buildHero(manifest, url, manager, time, light, textureScale = 1) 
   const isPedestal = (o) => { for (let p = o; p; p = p.parent) if (p === loaded.pedestal?.scene) return true; return false; };
   for (const [mesh, i] of samples) { mesh.getVertexPosition(i, point).applyMatrix4(mesh.matrixWorld); box.expandByPoint(point); if (!isPedestal(mesh)) heroBox.expandByPoint(point); }
   if (heroBox.isEmpty()) heroBox.copy(box);
+  // A hero whose body is not drawn (Io, a cloak: all of him is light) is framed with room for the
+  // glow around him, not tight on the bare mesh inside it.
+  const bodies = []; root.traverse((o) => { if (o.isMesh) bodies.push(o); });
+  if (bodies.length && bodies.every((o) => o.material?.visible === false)) heroBox.expandByScalar(heroBox.getSize(new THREE.Vector3()).length() * 0.35);
   // Props (Pudge's clown car, Largo's frogs): one copy per event, at the hero, shown while their
   // animation plays from the event's frame on, their own clip kept in step with the hero's time.
   // Added after the bounds, which are the hero's alone. (No prop of the game uses an attachment.)
@@ -538,6 +542,9 @@ async function buildHero(manifest, url, manager, time, light, textureScale = 1) 
   // Prismatic gems by slot: the game gives an item's effects the gem's colour (0–255) in control
   // point 15 and turns it on with CP 16 = (1, 1, 0); without a gem both are 0 (not CP 0 standing in).
   const gems = new Map(), GEMLESS = cpOf(new THREE.Matrix4());
+  // The game gives a hero's ambient his health in control point 11 (Io's hurt veil fades in below a
+  // third of it): on the loadout page he is whole.
+  const FULL_HEALTH = cpOf(new THREE.Matrix4().makeTranslation(1, 1, 1));
   // An arcana's gem (an item that is the hero's form: Terrorblade's) is the hero's: it colours all his
   // effects and the materials that read $GemColor, whatever item they are on.
   const heroGem = () => { for (const [slot, w] of worn) if (w.item && w.style?.form && gems.has(slot)) return gems.get(slot); return null; };
@@ -548,7 +555,7 @@ async function buildHero(manifest, url, manager, time, light, textureScale = 1) 
   // (Scythes of Sorrow's white, off), which the game's gem then overrides.
   const drive = (e, heroAt) => {
     const origin = e.rig ? rigOrigin(e.rig) : heroAt;
-    const cps = e.sim.cps; cps.clear(); cps.set(0, cpOf(origin)); cps.set(15, GEMLESS); cps.set(16, GEMLESS);
+    const cps = e.sim.cps; cps.clear(); cps.set(0, cpOf(origin)); cps.set(11, FULL_HEALTH); cps.set(15, GEMLESS); cps.set(16, GEMLESS);
     for (const d of e.drivers) cps.set(d.cp, e.fixed.get(d.cp) || placeCP(d, e.owner, origin));
     for (const [cp, c] of e.aims || []) if (!e.drivers.some((d) => d.cp === cp)) cps.set(cp, c);
     const gem = gemPoints(e.owner); if (gem) { cps.set(15, gem[0]); cps.set(16, gem[1]); }

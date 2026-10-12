@@ -124,12 +124,15 @@ The game's files never leave your machine except as the archive you make yoursel
    [Source2Viewer-CLI](https://github.com/ValveResourceFormat/ValveResourceFormat) is downloaded into
    `.cache/` on the first run. The result goes to `assets/heroes/` with an `index.json` roster.
 
-3. `npm run dev` for the site, `npm run build` to put it into `dist/`.
+3. `npm run dev` for the site, `npm run build` to put it into `dist/`. The site (`site/`) is a collection
+   screen: the hero's slots on the left (then sets, courier, ward, backdrop, effigy), the chosen one's
+   items on the right; a click puts an item on, a second click takes it off, and a thing on the hero
+   can be clicked to open its slot. `site/kit.js` is its plumbing on `HeroViewer` and `Loadout`.
 
 ### Cosmetics
 
 Every wearable of a hero can be put on in the viewer (`viewer.wear(slot, 'items/<id>/', style)`, or the
-site's item rail). Their files come straight from Steam, without a game install:
+site's slot list). Their files come straight from Steam, without a game install:
 
 ```sh
 # once, by hand: a Steam account with Dota 2 in its library; asks for the password and the Steam Guard code

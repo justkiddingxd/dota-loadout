@@ -1,6 +1,6 @@
-// What the design prototypes share, and no look of their own: the viewer and the outfit (the
-// library's HeroViewer and Loadout), the address kept in sync, names in the reader's language, the
-// catalog's questions (what a slot shows, an item's picture), a few icons drawn as SVG.
+// The site's ground, with no look of its own: the viewer and the outfit (the library's HeroViewer and
+// Loadout), the address kept in sync, names in the reader's language, the catalog's questions (what a
+// slot shows, an item's picture, where it is on screen), a few icons drawn as SVG.
 import { Raycaster, Vector2, Vector3 } from 'three';
 import { HeroViewer, Loadout } from '../src/index.js';
 
@@ -52,7 +52,8 @@ export async function start(canvas, { onChange = () => {}, onProgress = () => {}
     get hero() { return heroes.find((x) => x.id === look.hero) || null; },
     get catalog() { return look.catalog; },
     // The slots of the form he is in, in the game's order.
-    slots() { return (look.catalog?.slots || []).filter((s) => look.applies(s.name)); },
+    // A slot with nothing but its default (an ambient effects slot) offers no choice: left out.
+    slots() { const c = look.catalog; return (c?.slots || []).filter((s) => look.applies(s.name) && s.items.some((id) => !c.items[id].default)); },
     item(id) { return look.catalog?.items[id] || null; },
     // What a slot shows: its worn item, else its default; and the style.
     shown(slot) { const w = look.worn[slot]; return w ? w[0] : look.catalog?.slots.find((s) => s.name === slot)?.items.find((id) => look.catalog.items[id].default) ?? null; },
@@ -61,6 +62,10 @@ export async function start(canvas, { onChange = () => {}, onProgress = () => {}
     portrait: (id, kind = 'card') => `/heroes/${id}/${kind}.webp`,
     // Puts an item on (null: the slot's default), then tells the page.
     async wear(slot, id, style = 0) { const it = kit.item(id); await look.wear(slot, it?.default ? null : id, style); write(); onChange('wear'); },
+    // A prismatic gem (gems.json's key), an unusual effect, a kinetic gem in a slot's item; null takes it out.
+    async gem(slot, key) { await look.gem(slot, key); write(); onChange('wear'); },
+    unusual(slot, id) { look.unusual(slot, id); write(); onChange('wear'); },
+    kinetic(slot, id) { look.kineticGem(slot, id); write(); onChange('wear'); },
     async open(id) { onLoading(true); await look.show(id); onLoading(false); write(); onChange('hero'); },
     // A link to this outfit.
     get link() { return `${location.origin}${location.pathname}${look.address}`; },
