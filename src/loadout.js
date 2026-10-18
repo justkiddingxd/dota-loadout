@@ -90,7 +90,7 @@ export class Loadout {
   // A prismatic gem (gems.json's key) in a slot's item, if it takes one; null for the one it comes with.
   async gem(slot, key) { const own = this.socketed(slot); if (key && this.takesGem(slot) && key !== own) this.gems[slot] = key; else delete this.gems[slot]; await this.apply(slot); }
   // An unusual effect (an id of the item's list) on a slot's item, or null.
-  unusual(slot, id) { if (id != null && this.unusualsOf(slot).some((u) => u.id === id)) this.unusual[slot] = id; else delete this.unusual[slot]; this.viewer.unusual(slot, this.unusual[slot] ?? null); }
+  unusualEffect(slot, id) { if (id != null && this.unusualsOf(slot).some((u) => u.id === id)) this.unusual[slot] = id; else delete this.unusual[slot]; this.viewer.unusual(slot, this.unusual[slot] ?? null); }
   // A kinetic gem (an id of the hero's list, this.kinetics) in a slot's item, or null.
   kineticGem(slot, id) { const k = this.kinetics.find((x) => x.id === id); if (k && this.worn[slot]) this.kinetic[slot] = id; else delete this.kinetic[slot]; this.viewer.kinetic(slot, k?.activities || null); }
   // The kinetic gems of the hero shown (with the activities each changes).

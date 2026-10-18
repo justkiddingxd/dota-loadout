@@ -64,7 +64,7 @@ export async function start(canvas, { onChange = () => {}, onProgress = () => {}
     async wear(slot, id, style = 0) { const it = kit.item(id); await look.wear(slot, it?.default ? null : id, style); write(); onChange('wear'); },
     // A prismatic gem (gems.json's key), an unusual effect, a kinetic gem in a slot's item; null takes it out.
     async gem(slot, key) { await look.gem(slot, key); write(); onChange('wear'); },
-    unusual(slot, id) { look.unusual(slot, id); write(); onChange('wear'); },
+    unusual(slot, id) { look.unusualEffect(slot, id); write(); onChange('wear'); },
     kinetic(slot, id) { look.kineticGem(slot, id); write(); onChange('wear'); },
     async open(id) { onLoading(true); await look.show(id); onLoading(false); write(); onChange('hero'); },
     // A link to this outfit.

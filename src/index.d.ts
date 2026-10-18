@@ -95,7 +95,7 @@ export class Loadout {
   gemColours(): Promise<{ key: string; hex: string; name: { en: string; ru: string } }[]>;
   wear(slot: string, id: number | null, style?: number): Promise<void>;
   gem(slot: string, key: string | null): Promise<void>;
-  unusual(slot: string, id: number | null): void;
+  unusualEffect(slot: string, id: number | null): void;
   kineticGem(slot: string, id: number | null): void;
   readonly kinetics: KineticGem[];
 }
