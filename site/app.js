@@ -1,7 +1,7 @@
 // Loadout: as a shooter's collection screen. The hero's name huge behind him; on the left his slots, then
 // sets, courier, ward, backdrop and effigy; on the right the choices of the one picked. A click puts a
 // thing on, a click on the worn one takes it off; a thing on him can be clicked to open its slot. Under
-// him: animation, pause, a frame, a video, the embed code.
+// him: animation, pause, a frame, a video, the embed code, the outfit for the game.
 import { abilityOf } from '../src/index.js';
 import { animName, ATTRIBUTE, h, icon, lang, RARITY, rarityName, say, start } from './kit.js';
 
@@ -16,6 +16,10 @@ const T = ru ? {
   setOn: 'Надет', screens: 'Загрузочные экраны героя', scenes: 'Сцены', noBackdrop: 'Без фона', stuffs: { gold: 'Золото', frost: 'Лёд', jade: 'Нефрит', stone: 'Камень' }, hero: 'Герой', effigyTip: 'Выберите анимацию и поставьте паузу: это поза статуи.',
   frame: 'Кадр', video: 'Видео', stop: 'Стоп', pause: 'Пауза', play: 'Пуск', embed: 'Встроить', saved: 'Сохранено', noVideo: 'Браузер не умеет записывать видео', anim: 'Анимация',
   embedText: 'Герой в этом наряде на любой странице: элемент <dota-hero> из npm-пакета dota-loadout. Модели грузятся с этого сайта.', copy: 'Копировать',
+  game: 'В игру', gameText: 'Этот наряд в самой Dota 2, у вас на компьютере (другие игроки его не видят): файл игры items_game.txt, в котором стандартные предметы героя выглядят как надетые здесь — модели и стили, эффекты, анимации, иконки способностей, необычный эффект, кинетический и призматический самоцветы. Это мод файлов игры: на ваш страх и риск.',
+  gameSteps: ['Скачайте pak01_dir.vpk и положите его в папку dota 2 beta/game/dota_loadout (создайте её).', 'В файле dota 2 beta/game/dota/gameinfo.gi над строкой «Game dota» добавьте строку «Game dota_loadout».', 'Один файл — один герой: следующий заменяет прежний. После обновления Доты скачайте файл заново и снова добавьте строку.'],
+  download: 'Скачать pak01_dir.vpk', loadingGame: (mb) => `Загрузка файла игры… ${mb} МБ`, building: 'Сборка…', gameFailed: 'Не удалось собрать файл', gameNothing: 'Нечего ставить: на герое только стандартные предметы', gameLeft: 'Не вошло:',
+  gameWhy: { pet: 'курьеры и варды так не ставятся', 'no default': 'у героя нет стандартного предмета в этом слоте', unknown: 'предмета нет в файле игры', 'other hero': 'предмета нет в файле игры' },
 } : {
   heroes: 'Heroes', share: 'Link', copied: 'Copied', standard: 'Default', empty: 'Empty', none: 'None', find: 'Search', nothing: 'Nothing found', findHero: 'Find a hero', close: 'Close',
   skins: (n) => `${n} skins`, items: (n) => `${n} items`, off: 'click again to take it off',
@@ -24,6 +28,10 @@ const T = ru ? {
   setOn: 'Worn', screens: "The hero's loading screens", scenes: 'Scenes', noBackdrop: 'None', stuffs: { gold: 'Gold', frost: 'Frost', jade: 'Jade', stone: 'Stone' }, hero: 'Hero', effigyTip: 'Pick an animation and pause: that is the statue’s pose.',
   frame: 'Frame', video: 'Video', stop: 'Stop', pause: 'Pause', play: 'Play', embed: 'Embed', saved: 'Saved', noVideo: 'This browser cannot record video', anim: 'Animation',
   embedText: 'The hero in this outfit on any page: the <dota-hero> element of the dota-loadout npm package. Models load from this site.', copy: 'Copy',
+  game: 'To the game', gameText: 'This outfit in Dota 2 itself, on your computer (other players do not see it): the game’s items_game.txt in which the hero’s default items look like what he wears here — models and styles, effects, animations, ability icons, the unusual effect, kinetic and prismatic gems. It is a mod of the game’s files: at your own risk.',
+  gameSteps: ['Download pak01_dir.vpk and put it in the folder dota 2 beta/game/dota_loadout (make it).', 'In dota 2 beta/game/dota/gameinfo.gi, add the line “Game dota_loadout” above the line “Game dota”.', 'One file, one hero: the next replaces the last. After a Dota update, download the file again and add the line again.'],
+  download: 'Download pak01_dir.vpk', loadingGame: (mb) => `Loading the game’s file… ${mb} MB`, building: 'Building…', gameFailed: 'Could not build the file', gameNothing: 'Nothing to put on: he wears only his defaults', gameLeft: 'Left out:',
+  gameWhy: { pet: 'couriers and wards cannot go in this way', 'no default': 'the hero has no default item in this slot', unknown: 'the item is not in the game’s file', 'other hero': 'the item is not in the game’s file' },
 };
 const ACCENT = { str: '#e5533d', agi: '#4ec46b', int: '#3fa7e8', all: '#c58cf0' };
 const STUFFS = { gold: '#e0a040', frost: '#9fd0ff', jade: '#3fa36a', stone: '#8a8580' };
@@ -213,7 +221,7 @@ function effigyGrid() {
   })));
 }
 
-// ---- under him: animation, pause, frame, video, embed
+// ---- under him: animation, pause, frame, video, embed, to the game
 function play(name) { viewer.play(name); const sel = $('[data-tools] select'); if (sel) sel.value = name; }
 function renderTools() {
   const list = viewer.animations, sel = h('select', { 'aria-label': T.anim }, ...list.map((a) => h('option', { value: a.name }, animName(kit.hero, a))));
@@ -224,7 +232,8 @@ function renderTools() {
   const frame = h('button', { type: 'button', class: 'tool' }, T.frame); frame.onclick = saveFrame;
   const video = h('button', { type: 'button', class: `tool${recording.recorder ? ' rec' : ''}` }, recording.recorder ? `${T.stop} ${clock()}` : T.video); video.onclick = toggleVideo;
   const embed = h('button', { type: 'button', class: 'tool' }, T.embed); embed.onclick = openEmbed;
-  $('[data-tools]').replaceChildren(h('label', { class: 'anim' }, sel, h('span', { html: icon('down', 14) })), pause, frame, video, embed);
+  const game = h('button', { type: 'button', class: 'tool' }, T.game); game.onclick = openGame;
+  $('[data-tools]').replaceChildren(h('label', { class: 'anim' }, sel, h('span', { html: icon('down', 14) })), pause, frame, video, embed, game);
 }
 // A frame or a video of the stage as it looks: the canvas over the backdrop (or the navy).
 const canvas = $('[data-view]'), flat = document.createElement('canvas');
@@ -270,6 +279,26 @@ function openEmbed() {
   copy.onclick = async () => { try { await navigator.clipboard.writeText(code); copy.textContent = T.copied; setTimeout(() => { copy.textContent = T.copy; }, 1500); } catch { /* no clipboard */ } };
   const close = h('button', { type: 'button', class: 'x', 'aria-label': T.close, html: icon('close', 20) }); close.onclick = () => dialog.close();
   dialog.replaceChildren(h('header', {}, h('h2', {}, T.embed), close), h('p', {}, T.embedText), h('pre', {}, h('code', {}, code)), copy);
+  dialog.showModal();
+}
+// The outfit for the game itself: how to put it in, and the file (kit.toGame) with what went in.
+function openGame() {
+  const close = h('button', { type: 'button', class: 'x', 'aria-label': T.close, html: icon('close', 20) }); close.onclick = () => dialog.close();
+  const get = h('button', { type: 'button', class: 'primary' }, T.download), report = h('div', { class: 'report' });
+  const nameOf = (slot) => say(kit.slots().find((s) => s.name === slot)?.text) || T[slot] || slot;
+  get.onclick = async () => {
+    get.disabled = true; report.replaceChildren();
+    try {
+      const { file, done, skipped } = await kit.toGame((n) => { get.textContent = n < 0 ? T.building : T.loadingGame((n / 1048576).toFixed(0)); });
+      if (file) download(new Blob([file], { type: 'application/octet-stream' }), 'pak01_dir.vpk');
+      const extras = (d) => [d.unusual != null && T.unusual, d.kinetic != null && T.kinetic, d.color && T.gem].filter(Boolean).map((x) => x.toLowerCase());
+      report.replaceChildren(...[
+        file ? h('ul', {}, ...done.map((d) => h('li', {}, h('b', {}, nameOf(d.slot)), ` ${say(kit.item(d.item)?.name)}`, extras(d).length ? h('small', {}, ` + ${extras(d).join(', ')}`) : null))) : h('p', {}, T.gameNothing),
+        skipped.length ? h('p', {}, T.gameLeft, ...skipped.map((x) => h('span', {}, ` ${nameOf(x.slot)} — ${T.gameWhy[x.reason] || x.reason}.`))) : null].filter(Boolean));
+    } catch (e) { console.error(e); report.replaceChildren(h('p', {}, T.gameFailed)); }
+    get.disabled = false; get.textContent = T.download;
+  };
+  dialog.replaceChildren(h('header', {}, h('h2', {}, T.game), close), h('p', {}, T.gameText), h('ol', {}, ...T.gameSteps.map((x) => h('li', {}, x))), get, report);
   dialog.showModal();
 }
 dialog.addEventListener('click', (e) => { if (e.target === dialog) dialog.close(); });

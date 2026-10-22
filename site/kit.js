@@ -3,6 +3,7 @@
 // slot shows, an item's picture, where it is on screen), a few icons drawn as SVG.
 import { Raycaster, Vector2, Vector3 } from 'three';
 import { HeroViewer, Loadout } from '../src/index.js';
+import { gameVpk } from '../src/vpk.js';
 
 const stored = (() => { try { return localStorage.getItem('loadout-lang'); } catch { return null; } })();
 export const lang = stored || (/^(ru|uk|be|kk)/i.test(navigator.language) ? 'ru' : 'en');
@@ -108,6 +109,18 @@ export async function start(canvas, { onChange = () => {}, onProgress = () => {}
     },
     // Is a whole set on him?
     wearing(set) { return set.items.every((id) => look.worn[look.catalog.items[id].slot]?.[0] === id); },
+    // The outfit for the game itself (src/vpk.js): { file (pak01_dir.vpk), done, skipped }; the
+    // prismatic gems as colours, the ones asked for or those the items come with. onProgress(bytes) while
+    // the game's file loads, then -1.
+    async toGame(onProgress = () => {}) {
+      gameText ||= fetchGame(onProgress).catch((e) => { gameText = null; throw e; });
+      const text = await gameText, palette = await look.gemColours();
+      // -1: fetched, building (a moment for the page to say so).
+      onProgress(-1); await new Promise((ok) => setTimeout(ok, 50));
+      const worn = Object.fromEntries(Object.entries(look.worn).filter(([slot, w]) => w && look.applies(slot)));
+      const colors = Object.fromEntries(Object.keys(worn).filter((slot) => look.takesGem(slot)).map((slot) => [slot, palette.find((g) => g.key === (look.gems[slot] || look.socketed(slot)))?.hex]).filter(([, c]) => c));
+      return gameVpk(text, { hero: look.hero, worn, unusual: look.unusual, kinetic: look.kinetic, colors });
+    },
     async wearSet(set) {
       const worn = Object.fromEntries(Object.entries(look.worn).filter(([, w]) => w));
       for (const id of set.items) worn[look.catalog.items[id].slot] = [id, 0];
@@ -115,6 +128,14 @@ export async function start(canvas, { onChange = () => {}, onProgress = () => {}
     },
   };
   globalThis.__kit = kit;
+  // The game's items_game.txt (for toGame), fetched once: onProgress(bytes) as it comes.
+  let gameText = null;
+  const fetchGame = async (onProgress) => {
+    const r = await fetch('/game/items_game.txt'); if (!r.ok) throw new Error(`items_game.txt: ${r.status}`);
+    const reader = r.body.getReader(), chunks = []; let n = 0;
+    for (;;) { const { done, value } = await reader.read(); if (done) break; chunks.push(value); n += value.length; onProgress(n); }
+    return new TextDecoder().decode(await new Blob(chunks).arrayBuffer());
+  };
   const write = () => { if (look.hero) history.replaceState(null, '', `${location.pathname}${look.address}`); };
   // The page draws itself once start() resolves; later loads tell it.
   const fromAddress = async (first = false) => { onLoading(true); await look.show(location.hash.length > 1 ? location.hash : 'juggernaut'); onLoading(false); write(); if (!first) onChange('hero'); };

@@ -11,7 +11,7 @@ mkdir -p "$TARGET"
 rsync -a --delete --exclude index.html --exclude '*.gz' --exclude /design/ dist/ "$TARGET/"
 # A .gz beside each model and data file that is newer than its own (nginx's gzip_static sends it
 # instead: a model a fifth of its size); those whose file is gone go too.
-find "$TARGET" -type f \( -name '*.glb' -o -name '*.json' -o -name '*.js' -o -name '*.css' \) -print0 |
+find "$TARGET" -type f \( -name '*.glb' -o -name '*.json' -o -name '*.js' -o -name '*.css' -o -name '*.txt' \) -print0 |
   xargs -0 -P "$(nproc)" -n 200 sh -c 'for f; do [ "$f.gz" -nt "$f" ] || gzip -6 -c "$f" > "$f.gz"; done' sh
 find "$TARGET" -type f -name '*.gz' -print0 | xargs -0 -P "$(nproc)" -n 500 sh -c 'for g; do [ -e "${g%.gz}" ] || rm -f "$g"; done' sh
 cp dist/index.html "$TARGET/index.html"

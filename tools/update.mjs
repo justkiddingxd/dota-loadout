@@ -9,8 +9,8 @@
 // fetch-dota stops with that, and so does this (log in by hand, see the top of fetch-dota.mjs).
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 import { heroScreens } from './lib/game.mjs';
 import { parseKV } from './lib/kv1.mjs';
 
@@ -58,6 +58,11 @@ if (newScreens.length || newHeroes.length) run('build-screens.mjs', '--game', GA
 // Couriers and wards are any hero's: those new or changed, and their list.
 const pets = fresh.filter(([, i]) => i.prefab === 'courier' || i.prefab === 'ward').map(([id]) => id);
 if (pets.length) run('build-couriers.mjs', '--game', GAME, '--cli', CLI, '--keep', '--items', pets.join(','));
-if ((heroes.length || newScreens.length || pets.length) && !flag('no-deploy') && !flag('dry')) { log('→ deploy'); execFileSync('sh', [join(ROOT, 'tools/deploy.sh')], { cwd: ROOT, stdio: 'inherit' }); }
+// The game's items_game.txt for the site's «To the game» (src/vpk.js): an outfit's VPK is the game's
+// file as it is now, with the outfit in it.
+const SITE_IG = join(ASSETS, 'game/items_game.txt'), igFile = readFileSync(join(GAME, 'scripts/items/items_game.txt'));
+const igChanged = !existsSync(SITE_IG) || !readFileSync(SITE_IG).equals(igFile);
+if (igChanged) { log('→ items_game.txt for the site'); if (!flag('dry')) { mkdirSync(dirname(SITE_IG), { recursive: true }); writeFileSync(SITE_IG, igFile); } }
+if ((heroes.length || newScreens.length || pets.length || igChanged) && !flag('no-deploy') && !flag('dry')) { log('→ deploy'); execFileSync('sh', [join(ROOT, 'tools/deploy.sh')], { cwd: ROOT, stdio: 'inherit' }); }
 if (!flag('dry')) writeFileSync(STATE, JSON.stringify({ updated: new Date().toISOString(), items: items.map(([id]) => id), signs, screens }));
 log(heroes.length || newScreens.length ? `done: ${heroes.length} heroes, ${newScreens.length} loading screens` : 'nothing new');

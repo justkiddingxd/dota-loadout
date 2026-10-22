@@ -163,12 +163,15 @@ wards stand beside any hero as pets (`node tools/build-couriers.mjs`: `assets/it
 `assets/couriers.json`; a courier's flying model is a style): `viewer.wear('courier', 10018, 1)`, or
 `courier=10018.1,ward=10006` in an address. Their effects ride on their own skeleton.
 
-An outfit of the site can go into the game itself: `node tools/build-vpk.mjs '#shredder/weapon=12849!826'`
-(an address or a whole link) writes `dota_loadout/pak01_dir.vpk`, the game's `items_game.txt` in which the
-hero's default items take the look of what is worn — the item's model and effects in its style, and its
-unusual effect. The folder goes to `dota 2 beta/game/`, and `Game dota_loadout` above `Game dota` in
-`game/dota/gameinfo.gi` (a patch puts the file back). Prismatic and kinetic gems, couriers and wards are
-left out: the game gives them with the item. A prototype, not tried in the game yet.
+An outfit can go into the game itself (`src/vpk.js`): the site's «To the game» button, or
+`node tools/build-vpk.mjs '#shredder/weapon=12849!826'` (an address or a whole link; `dota_loadout/pak01_dir.vpk`).
+It is the game's `items_game.txt` in which the hero's default items take the look of what is worn — the
+item's model and visuals in its style (effects, animations, ability icons, the hero's form) — with the
+unusual effect, kinetic gem and prismatic gem as static sockets of the item, as the game writes them
+(`CProtoItemSocket_Effect`, `_AssetModifier`, `_Color`). The site serves the game's file at
+`game/items_game.txt` (`tools/update.mjs` copies it after a patch) and builds the VPK in the browser. The
+folder goes to `dota 2 beta/game/`, and `Game dota_loadout` above `Game dota` in `game/dota/gameinfo.gi`
+(a patch puts the file back). Couriers and wards are left out. Not tried in the game yet.
 
 Items go to `assets/items/<id>/` (models, materials and effects of all their styles), each hero's catalog
 to `assets/heroes/<id>/items.json`. They are not kept in git (about 250 KB an item, 10 000 items).
@@ -205,4 +208,4 @@ Loadout — все герои Dota 2 в браузере на three.js: игро
 (на сервере раз в сутки, `loadout-update.timer`; подробности выше, в Cosmetics). На сайте есть насмешки,
 эмблемы, эффекты способностей у предметов, загрузочные экраны героя как фон и статуи-эффигии (золото, лёд,
 нефрит, камень). Курьеры и варды встают рядом с любым героем (режим «Курьер»).
-`node tools/build-vpk.mjs '<адрес>'` собирает образ с сайта в VPK для самой игры (прототип; подробности выше).
+Кнопка «В игру» (или `node tools/build-vpk.mjs '<адрес>'`) собирает наряд в VPK для самой игры: предметы в стилях, эффекты, анимации, иконки способностей, необычный эффект, кинетический и призматический самоцветы (подробности выше).
