@@ -163,7 +163,7 @@ wards stand beside any hero as pets (`node tools/build-couriers.mjs`: `assets/it
 `assets/couriers.json`; a courier's flying model is a style): `viewer.wear('courier', 10018, 1)`, or
 `courier=10018.1,ward=10006` in an address. Their effects ride on their own skeleton.
 
-An outfit can go into the game itself, as mods do: the site's «To the game» builds it in the browser
+An outfit can go into the game itself, as mods do (the VPK download is by [Harlord](https://t.me/harlord_mods)): the site's «To the game» builds it in the browser
 (`src/gamevpk.js`), `node tools/build-vpk.mjs '#juggernaut/hero_base=9059,head=30261'` (an address or a
 whole link) in node — a `pak88_dir.vpk` of the game's own files put in place of the hero's defaults, no
 game file changed. Each worn item's model (in its style's skin) at its slot's default model, with its
@@ -213,4 +213,4 @@ Loadout — все герои Dota 2 в браузере на three.js: игро
 (на сервере раз в сутки, `loadout-update.timer`; подробности выше, в Cosmetics). На сайте есть насмешки,
 эмблемы, эффекты способностей у предметов, загрузочные экраны героя как фон и статуи-эффигии (золото, лёд,
 нефрит, камень). Курьеры и варды встают рядом с любым героем (режим «Курьер»).
-Кнопка «В игру» (или `node tools/build-vpk.mjs '<адрес>'`) собирает наряд в VPK для самой игры, как делают моды: модели предметов на месте стандартных, их эффекты и необычный эффект в модели, эффекты способностей, иконки и анимации предметов и кинетических самоцветов в модели героя. Файл кладётся в `dota 2 beta/game/dota_russian/`, в параметры запуска — `-language russian` (подробности выше).
+Кнопка «В игру» (или `node tools/build-vpk.mjs '<адрес>'`) собирает наряд в VPK для самой игры, как делают моды (автор скачивания VPK — [Harlord](https://t.me/harlord_mods)): модели предметов на месте стандартных, их эффекты и необычный эффект в модели, эффекты способностей, иконки и анимации предметов и кинетических самоцветов в модели героя. Файл кладётся в `dota 2 beta/game/dota_russian/`, в параметры запуска — `-language russian` (подробности выше).

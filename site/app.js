@@ -18,7 +18,7 @@ const T = ru ? {
   embedText: 'Герой в этом наряде на любой странице: элемент <dota-hero> из npm-пакета dota-loadout. Модели грузятся с этого сайта.', copy: 'Копировать',
   game: 'В игру', gameText: 'Этот наряд в самой Dota 2, у вас на компьютере (другие игроки его не видят), как ставят моды: файлы игры на месте стандартных — модели предметов в их стилях, их эффекты и необычный эффект, эффекты и иконки способностей, анимации предметов и кинетических самоцветов. Призматические самоцветы так не ставятся. Это мод файлов игры: на ваш страх и риск.',
   gameSteps: ['Скачайте pak88_dir.vpk и положите его в папку dota 2 beta/game/dota_russian (создайте её; если моды уже стоят в папке другого языка — туда).', 'В параметрах запуска Доты в Steam добавьте -language russian.', 'Один файл — один герой: следующий заменяет прежний. После обновления Доты скачайте файл заново.'],
-  download: 'Скачать pak88_dir.vpk', loadingGame: (mb) => `Загрузка файлов игры… ${mb} МБ`, gameFailed: 'Не удалось собрать файл', gameNothing: 'Нечего ставить: на герое только стандартные предметы', gameLeft: 'Не вошло:', gameAnims: 'Анимации', gameMissing: (n) => `Нет на сайте файлов игры: ${n}`,
+  download: 'Скачать pak88_dir.vpk', gameBy: 'Автор скачивания VPK —', loadingGame: (mb) => `Загрузка файлов игры… ${mb} МБ`, gameFailed: 'Не удалось собрать файл', gameNothing: 'Нечего ставить: на герое только стандартные предметы', gameLeft: 'Не вошло:', gameAnims: 'Анимации', gameMissing: (n) => `Нет на сайте файлов игры: ${n}`,
   gameWhy: { pet: 'курьеры и варды так не ставятся', 'no default': 'у героя нет стандартной модели в этом слоте', 'no model': 'у предмета нет своей модели', unknown: 'предмета нет в данных игры', gem: 'призматический самоцвет так не ставится', extra: 'дополнительная модель предмета' },
 } : {
   heroes: 'Heroes', share: 'Link', copied: 'Copied', standard: 'Default', empty: 'Empty', none: 'None', find: 'Search', nothing: 'Nothing found', findHero: 'Find a hero', close: 'Close',
@@ -30,7 +30,7 @@ const T = ru ? {
   embedText: 'The hero in this outfit on any page: the <dota-hero> element of the dota-loadout npm package. Models load from this site.', copy: 'Copy',
   game: 'To the game', gameText: 'This outfit in Dota 2 itself, on your computer (other players do not see it), as mods are put in: the game’s files in place of the defaults — the items’ models in their styles, their effects and the unusual effect, ability effects and icons, the animations of items and kinetic gems. Prismatic gems cannot go in this way. It is a mod of the game’s files: at your own risk.',
   gameSteps: ['Download pak88_dir.vpk and put it in the folder dota 2 beta/game/dota_russian (make it; if your mods are in another language’s folder, put it there).', 'Add -language russian to Dota’s launch options in Steam.', 'One file, one hero: the next replaces the last. After a Dota update, download the file again.'],
-  download: 'Download pak88_dir.vpk', loadingGame: (mb) => `Loading the game’s files… ${mb} MB`, gameFailed: 'Could not build the file', gameNothing: 'Nothing to put on: he wears only his defaults', gameLeft: 'Left out:', gameAnims: 'Animations', gameMissing: (n) => `Game files missing on the site: ${n}`,
+  download: 'Download pak88_dir.vpk', gameBy: 'VPK download by', loadingGame: (mb) => `Loading the game’s files… ${mb} MB`, gameFailed: 'Could not build the file', gameNothing: 'Nothing to put on: he wears only his defaults', gameLeft: 'Left out:', gameAnims: 'Animations', gameMissing: (n) => `Game files missing on the site: ${n}`,
   gameWhy: { pet: 'couriers and wards cannot go in this way', 'no default': 'the hero has no default model in this slot', 'no model': 'the item has no model of its own', unknown: 'the item is not in the game’s data', gem: 'a prismatic gem cannot go in this way', extra: 'an extra model of the item' },
 };
 const ACCENT = { str: '#e5533d', agi: '#4ec46b', int: '#3fa7e8', all: '#c58cf0' };
@@ -302,7 +302,9 @@ function openGame() {
     } catch (e) { console.error(e); report.replaceChildren(h('p', {}, T.gameFailed)); }
     get.disabled = false; get.textContent = T.download;
   };
-  dialog.replaceChildren(h('header', {}, h('h2', {}, T.game), close), h('p', {}, T.gameText), h('ol', {}, ...T.gameSteps.map((x) => h('li', {}, x))), get, report);
+  // The VPK download is Harlord's: said with the file.
+  const credit = h('p', { class: 'credit' }, `${T.gameBy} `, h('a', { href: 'https://t.me/harlord_mods', target: '_blank', rel: 'noopener' }, 'Harlord'));
+  dialog.replaceChildren(h('header', {}, h('h2', {}, T.game), close), h('p', {}, T.gameText), h('ol', {}, ...T.gameSteps.map((x) => h('li', {}, x))), get, credit, report);
   dialog.showModal();
 }
 dialog.addEventListener('click', (e) => { if (e.target === dialog) dialog.close(); });
