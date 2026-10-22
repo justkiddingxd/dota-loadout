@@ -1,7 +1,7 @@
 // Fetches the game's files straight from Steam (no game install): what tools/extract-dota.ps1 packs
 // from an installed game, plus every hero cosmetic (wearables, taunts, their styles, effects and
 // inventory icons), unpacked into a game folder for tools/build-heroes.mjs --game.
-//   node tools/fetch-dota.mjs [--out .cache/steam/game/dota] [--batch 40] [--defaults-only]
+//   node tools/fetch-dota.mjs [--out .cache/steam/game/dota] [--batch 40] [--defaults-only] [--paths <regex>]
 // Needs DepotDownloader in .cache/steam (or --steam <dir>) and a Steam account with Dota 2 in its
 // library, logged in once by hand (it asks for the password and the Steam Guard code, then keeps a
 // token): ./DepotDownloader -app 570 -depot 373301 -filelist files.txt -dir dl -username <login>
@@ -97,6 +97,12 @@ async function take(wanted, follow = true) {
     for (const a of fetched) for (const path of eager.get(a) || []) if (!local(path)) write(path, vpk.read(path));
     queue = [...waiting.values()].flatMap((s) => [...s]);
   }
+}
+
+// Only some files, and nothing else: --paths <regex> (ability icons, say: '^panorama/images/spellicons/juggernaut_').
+if (opt('paths', null)) {
+  const re = new RegExp(opt('paths')), list = [...vpk.files.keys()].filter((p) => re.test(p));
+  log(`${list.length} files of ${re}`); await take(list, false); log(`done: ${done.size} files`); process.exit(0);
 }
 
 // Scripts and localization, as they are.
