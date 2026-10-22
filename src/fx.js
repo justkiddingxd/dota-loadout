@@ -1455,12 +1455,32 @@ attribute vec4 color; attribute vec4 uvA; attribute vec4 uvB; attribute float bl
 varying vec4 vColor; varying vec2 vUvA; varying vec2 vUvB; varying float vBlend;
 void main() { vColor = color; vUvA = mix(uvA.xy, uvA.zw, uv); vUvB = mix(uvB.xy, uvB.zw, uv); vBlend = blend; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`;
 const fragmentShader = `
-uniform sampler2D map; uniform float overbright; uniform float addSelf; uniform bool saturateColor; uniform int mode; uniform bool blendFrames;
+uniform sampler2D map; uniform float overbright; uniform float addSelf; uniform bool saturateColor; uniform int mode; uniform bool blendFrames; uniform int channels;
 uniform sampler2D tSceneDepth; uniform vec2 uSceneSize; uniform float uNear, uFar, uFeather; uniform bool uSoft;
 varying vec4 vColor; varying vec2 vUvA; varying vec2 vUvB; varying float vBlend;
+// m_nTextureChannels: which of the texture's channels give the colour and which the alpha (the game's
+// spritecard; ValveResourceFormat's mask of a first layer). A glow on black with a solid alpha, read as
+// RGBA_RGBALPHA, has its alpha in its brightness: read as RGBA, it drew a square (Primeval Abomination's
+// dark halo, a black card behind Primal Beast).
+vec4 channelMix(vec4 t) {
+  float l = dot(t.rgb, vec3(0.299, 0.587, 0.114));
+  if (channels == 0) return vec4(t.rgb, 1.0);
+  if (channels == 2) return vec4(vec3(1.0), t.a);
+  if (channels == 4) return vec4(mix(vec3(1.0), t.rgb, t.a), 1.0);
+  if (channels == 5) return vec4(mix(vec3(1.0), t.rgb, l), 1.0);
+  if (channels == 6) return vec4(t.rgb, l);
+  if (channels == 7 || channels == 8) return vec4(vec3(1.0), l);
+  if (channels == 9) return vec4(t.rrr, 1.0);
+  if (channels == 10) return vec4(t.ggg, 1.0);
+  if (channels == 11) return vec4(t.bbb, 1.0);
+  if (channels == 12) return t.rrrr;
+  if (channels == 13) return t.gggg;
+  if (channels == 14) return t.bbbb;
+  return t;
+}
 float viewDepth(float d) { float z = d * 2.0 - 1.0; return 2.0 * uNear * uFar / (uFar + uNear - z * (uFar - uNear)); }
 void main() {
-  vec4 t = texture2D(map, vUvA); if (blendFrames) t = mix(t, texture2D(map, vUvB), vBlend);
+  vec4 t = texture2D(map, vUvA); if (blendFrames) t = mix(t, texture2D(map, vUvB), vBlend); t = channelMix(t);
   vec3 c = vColor.rgb * t.rgb; float a = t.a * vColor.a;
   // Depth feathering: the card fades where it meets what lies behind it (a glow on an item lights its
   // outline and leaves the item seen through it, as in the game).
@@ -1476,13 +1496,15 @@ void main() {
 export const SOFT = { tSceneDepth: { value: null }, uSceneSize: { value: new THREE.Vector2(1, 1) }, uNear: { value: 0.1 }, uFar: { value: 100 }, uSoft: { value: false } };
 // How near (game units) a feathered card fades out where nothing is set (the usual authored distance).
 const FEATHER = 6;
+const CHANNELS = ['RGB', 'RGBA', 'A', 'RGB_A', 'RGB_ALPHAMASK', 'RGB_RGBMASK', 'RGBA_RGBALPHA', 'A_RGBALPHA', 'RGB_A_RGBALPHA', 'R', 'G', 'B', 'RALPHA', 'GALPHA', 'BALPHA'].map((c) => `SPRITECARD_TEXTURE_CHANNEL_MIX_${c}`);
 function material(tex, r) {
   const mode = r.m_nOutputBlendMode === 'PARTICLE_OUTPUT_BLEND_MODE_ADD' ? 1 : r.m_nOutputBlendMode === 'PARTICLE_OUTPUT_BLEND_MODE_MOD2X' ? 5 : 0;
   const feather = /ON_/.test(r.m_nFeatheringMode || '') ? number(r.m_flFeatheringMaxDist, FEATHER)(null, null) * 0.0254 : 0;
   const m = new THREE.ShaderMaterial({
     vertexShader, fragmentShader, transparent: true, depthWrite: false, side: THREE.DoubleSide,
     uniforms: { map: { value: tex }, overbright: { value: number(r.m_flOverbrightFactor, 1)(null, null) }, addSelf: { value: 1 + number(r.m_flAddSelfAmount, 0)(null, null) },
-      saturateColor: { value: r.m_bSaturateColorPreAlphaBlend !== false }, mode: { value: mode }, blendFrames: { value: r.m_bBlendFramesSeq0 !== false }, ...SOFT, uFeather: { value: feather } },
+      saturateColor: { value: r.m_bSaturateColorPreAlphaBlend !== false }, mode: { value: mode }, blendFrames: { value: r.m_bBlendFramesSeq0 !== false }, ...SOFT, uFeather: { value: feather },
+      channels: { value: CHANNELS.indexOf(r.m_vecTexturesInput?.[0]?.m_nTextureChannels ?? 'SPRITECARD_TEXTURE_CHANNEL_MIX_RGBA') } },
   });
   // Mod2x: colour = 2 × source × destination, so 50 % grey changes nothing. The canvas's alpha must
   // stay as it is: blended like the colour, it fell to 2 × a × alpha, and the sprite's whole square
