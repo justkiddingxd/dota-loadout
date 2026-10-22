@@ -1458,21 +1458,20 @@ const fragmentShader = `
 uniform sampler2D map; uniform float overbright; uniform float addSelf; uniform bool saturateColor; uniform int mode; uniform bool blendFrames; uniform int channels;
 uniform sampler2D tSceneDepth; uniform vec2 uSceneSize; uniform float uNear, uFar, uFeather; uniform bool uSoft;
 varying vec4 vColor; varying vec2 vUvA; varying vec2 vUvB; varying float vBlend;
-// m_nTextureChannels: which of the texture's channels give the colour and which the alpha (the game's
-// spritecard; ValveResourceFormat's mask of a first layer). A glow on black with a solid alpha, read as
-// RGBA_RGBALPHA, has its alpha in its brightness: read as RGBA, it drew a square (Primeval Abomination's
-// dark halo, a black card behind Primal Beast).
+// m_nTextureChannels: which of the texture's channels give the alpha (the game's spritecard; as
+// ValveResourceFormat masks a first layer). A glow on black with a solid alpha, read as RGBA_RGBALPHA,
+// has its alpha in its brightness: read as RGBA, it drew a square (Primeval Abomination's dark halo,
+// a black card behind Primal Beast). Mixes that take no alpha of their own (RGB, the masks, one
+// colour channel) keep the texture's: an alpha of 1 there drew the noise trail on the same tail's
+// ball as a solid grey strip.
 vec4 channelMix(vec4 t) {
   float l = dot(t.rgb, vec3(0.299, 0.587, 0.114));
-  if (channels == 0) return vec4(t.rgb, 1.0);
   if (channels == 2) return vec4(vec3(1.0), t.a);
-  if (channels == 4) return vec4(mix(vec3(1.0), t.rgb, t.a), 1.0);
-  if (channels == 5) return vec4(mix(vec3(1.0), t.rgb, l), 1.0);
   if (channels == 6) return vec4(t.rgb, l);
   if (channels == 7 || channels == 8) return vec4(vec3(1.0), l);
-  if (channels == 9) return vec4(t.rrr, 1.0);
-  if (channels == 10) return vec4(t.ggg, 1.0);
-  if (channels == 11) return vec4(t.bbb, 1.0);
+  if (channels == 9) return vec4(t.rrr, t.a);
+  if (channels == 10) return vec4(t.ggg, t.a);
+  if (channels == 11) return vec4(t.bbb, t.a);
   if (channels == 12) return t.rrrr;
   if (channels == 13) return t.gggg;
   if (channels == 14) return t.bbbb;
