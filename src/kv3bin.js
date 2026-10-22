@@ -1,5 +1,5 @@
-// Binary KeyValues3 (the blocks of compiled resources: a model's sequences, its keyvalues), versions 4
-// and 5, read and written back as they were: every value keeps its type (an int8, a typed array, a
+// Binary KeyValues3 (the blocks of compiled resources: a model's sequences, its keyvalues), versions 1
+// to 5 read, 4 and 5 written back as they were (older ones as 5): every value keeps its type (an int8, a typed array, a
 // flagged string), so an untouched document writes the same bytes. Values read as { type, value }
 // nodes (objects: [[name, node], …], arrays: [node, …]); a change to one is a change to its value.
 // After ValveResourceFormat's BinaryKV3 (the game's own reader is the judge of what is valid).
@@ -64,16 +64,19 @@ export function lz4Encode(src) {
 export function readKV3(bytes, options = {}) {
   const b = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes), dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
   const magic = dv.getUint32(0, true), version = magic & 255;
-  if ((magic & 0xffffff00) !== 0x4b563300 || version < 4 || version > 5) throw new Error(`KV3: version ${version} of ${magic.toString(16)} not read`);
+  if ((magic & 0xffffff00) !== 0x4b563300 || version < 1 || version > 5) throw new Error(`KV3: version ${version} of ${magic.toString(16)} not read`);
   let p = 4; const u32 = () => { const x = dv.getUint32(p, true); p += 4; return x; }, u16 = () => { const x = dv.getUint16(p, true); p += 2; return x; };
   const format = b.slice(p, p + 16); p += 16;
-  const compression = u32(), dictionary = u16(), frameSize = u16();
-  const h = { bytes1: u32(), bytes4: u32(), bytes8: u32(), types: u32(), objects: u16(), arrays: u16(), total: u32(), compressed: u32(), blobs: u32(), blobBytes: u32(), bytes2: u32(), blockSizes: u32() };
+  // The header grew with the versions: 1 had no compression details, 4 added 2-byte values, 5 a second buffer.
+  const compression = u32(), dictionary = version >= 2 ? u16() : 0, frameSize = version >= 2 ? u16() : 0;
+  const h = version === 1 ? { bytes1: u32(), bytes4: u32(), bytes8: u32(), total: u32(), blobs: 0, blobBytes: 0, bytes2: 0 }
+    : { bytes1: u32(), bytes4: u32(), bytes8: u32(), types: u32(), objects: u16(), arrays: u16(), total: u32(), compressed: u32(), blobs: u32(), blobBytes: u32(), ...(version >= 4 ? { bytes2: u32(), blockSizes: u32() } : { bytes2: 0 }) };
+  if (version === 1) h.compressed = b.length - p;
   if (version >= 5) Object.assign(h, { size1: u32(), csize1: u32(), size2: u32(), csize2: u32(), b1_2: u32(), b2_2: u32(), b4_2: u32(), b8_2: u32(), nodes: u32(), objects2: u32(), arrays2: u32(), elements: u32() });
   if (dictionary || compression > 2) throw new Error(`KV3: compression ${compression} not read`);
   const zstd = (data, size) => { if (!options.zstd) throw new Error('KV3: zstd data needs options.zstd'); const out = new Uint8Array(options.zstd(data, size)); if (out.length !== size) throw new Error('KV3: zstd size'); return out; };
   // Before version 5 a zstd buffer and the blobs are one frame (the blobs after the buffer).
-  const v4zstd = version === 4 && compression === 2;
+  const v4zstd = version < 5 && compression === 2;
   const take = (size, csize) => {
     const full = v4zstd ? size + h.blobBytes : size;
     const raw = compression === 1 ? lz4Decode(b.subarray(p, p + csize), size) : compression === 2 ? zstd(b.subarray(p, p + csize), full) : b.slice(p, p + size);
@@ -83,7 +86,7 @@ export function readKV3(bytes, options = {}) {
   const lane = (buf, at, count, size) => ({ v: new DataView(buf.buffer, buf.byteOffset + at, count * size), p: 0 });
   const ctx = { strings: [], types: null, t: 0, lengths: null };
   let main, aux;
-  if (version === 4) {
+  if (version <= 4) {
     const buf = take(h.total, h.compressed); let o = 0;
     const L = {}; L[1] = lane(buf, o, h.bytes1, 1); o += h.bytes1;
     if (h.bytes2) o = align(o, 2); L[2] = lane(buf, o, h.bytes2, 2); o += h.bytes2 * 2;
@@ -92,7 +95,8 @@ export function readKV3(bytes, options = {}) {
     const nStrings = L[4].v.getInt32(0, true); L[4].p = 4;
     const start = o, dec = new TextDecoder();
     for (let i = 0; i < nStrings; i++) { const z = buf.indexOf(0, o); ctx.strings.push(dec.decode(buf.subarray(o, z))); o = z + 1; }
-    ctx.types = buf.subarray(o, start + h.types); o = start + h.types;
+    const typesEnd = version === 1 ? h.total - 4 : start + h.types;
+    ctx.types = buf.subarray(o, typesEnd); o = typesEnd;
     ctx.tail = { buf, at: o, blobsAt: h.total };
     main = aux = L;
   } else {
@@ -129,14 +133,21 @@ export function readKV3(bytes, options = {}) {
   ctx.blobs = blobs; ctx.blob = 0;
   const get = (L, size, read) => { const x = read(L[size].v, L[size].p); L[size].p += size; return x; };
   const int = (L) => get(L, 4, (v, o) => v.getInt32(o, true));
-  const type = () => { const t = { type: ctx.types[ctx.t++] }; if (t.type & 0x80) t.flag = ctx.types[ctx.t++]; if (t.type & 0x40) t.extra = ctx.types[ctx.t++]; t.type &= 0x3f; return t; };
+  // Before version 3 a flag was a bit field (the lowest bit set wins, as ValveResourceFormat reads it).
+  const legacy = (f) => (f & 1 ? 1 : f & 2 ? 2 : f & 8 ? 3 : f & 16 ? 4 : f & 32 ? 5 : undefined);
+  const type = () => {
+    const t = { type: ctx.types[ctx.t++] };
+    if (version < 3) { if (t.type & 0x80) { const f = legacy(ctx.types[ctx.t++]); if (f !== undefined) t.flag = f; } t.type &= 0x7f; return t; }
+    if (t.type & 0x80) t.flag = ctx.types[ctx.t++]; if (t.type & 0x40) t.extra = ctx.types[ctx.t++]; t.type &= 0x3f; return t;
+  };
   const str = (id) => (id >= 0 && id < ctx.strings.length ? ctx.strings[id] : { empty: id });
   const value = (t, L) => {
     if (t.type in CONST) return { ...t, value: CONST[t.type] };
     if (LANES[t.type]) { const [size, read] = LANES[t.type]; return { ...t, value: get(L, size, read) }; }
     switch (t.type) {
       case T.STRING: return { ...t, value: str(int(main)) };
-      case T.BLOB: return { ...t, value: ctx.blobs[ctx.blob++] };
+      case T.BLOB: if (version < 2) { const n = int(main), at = main[1].p; main[1].p += n; return { ...t, value: new Uint8Array(main[1].v.buffer, main[1].v.byteOffset + at, n).slice() }; }
+        return { ...t, value: ctx.blobs[ctx.blob++] };
       case T.ARRAY: { const n = int(main), out = []; for (let i = 0; i < n; i++) out.push(value(type(), main)); return { ...t, value: out }; }
       case T.ARRAY_TYPED: case T.ARRAY_BYTE_LENGTH: case T.ARRAY_AUX: {
         const n = t.type === T.ARRAY_TYPED ? int(main) : get(main, 1, (v, o) => v.getUint8(o)), sub = type(), from = t.type === T.ARRAY_AUX ? aux : main, out = [];
@@ -153,7 +164,9 @@ export function readKV3(bytes, options = {}) {
 }
 
 // Written as LZ4 when it was compressed (zstd too: the browser has no zstd writer), uncompressed if not.
-export function writeKV3({ version, format, compression: was, root }) {
+export function writeKV3({ version: read, format, compression: was, root }) {
+  // Versions before 4 are written as 5 (as ValveResourceFormat does); their flags were read as 5's.
+  const version = read >= 4 ? read : 5;
   const compression = was ? 1 : 0, frameSize = compression ? 16384 : 0, blobs = [];
   // Lanes as growing byte lists; the main ones, the auxiliary ones (v5: buffer 1), types, object lengths.
   const mk = () => ({ 1: [], 2: [], 4: [], 8: [] }), main = mk(), aux = version >= 5 ? mk() : main, types = [], lengths = [];

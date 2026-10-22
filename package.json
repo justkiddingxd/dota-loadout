@@ -34,7 +34,7 @@
     "dev": "vite site",
     "build": "vite build site",
     "heroes": "node tools/build-heroes.mjs",
-    "check": "node --check src/index.js && node --check src/viewer.js && node --check src/fx.js && node --check src/material.js && node --check src/loadout.js && node --check src/element.js && node --check src/bloom.js && node --check tools/build-heroes.mjs && node --check tools/lib/hero.mjs && node --check tools/lib/game.mjs"
+    "check": "node --check src/index.js && node --check src/viewer.js && node --check src/fx.js && node --check src/material.js && node --check src/loadout.js && node --check src/element.js && node --check src/bloom.js && node --check tools/build-heroes.mjs && node --check tools/lib/hero.mjs && node --check tools/lib/game.mjs && node --check src/vpk.js && node --check src/kv3bin.js && node --check src/resource.js && node --check src/gamemod.js && node --check src/gamevpk.js && node --check tools/build-vpk.mjs && node --check tools/build-game.mjs"
   },
   "keywords": [
     "dota2",
@@ -56,6 +56,7 @@
     "@gltf-transform/extensions": "4.5.1",
     "@gltf-transform/functions": "4.5.1",
     "@napi-rs/canvas": "1.0.9",
+    "fzstd": "^0.1.1",
     "meshoptimizer": "1.3.0",
     "three": "0.186.1",
     "vite": "8.3.1"

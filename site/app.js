@@ -16,10 +16,10 @@ const T = ru ? {
   setOn: 'Надет', screens: 'Загрузочные экраны героя', scenes: 'Сцены', noBackdrop: 'Без фона', stuffs: { gold: 'Золото', frost: 'Лёд', jade: 'Нефрит', stone: 'Камень' }, hero: 'Герой', effigyTip: 'Выберите анимацию и поставьте паузу: это поза статуи.',
   frame: 'Кадр', video: 'Видео', stop: 'Стоп', pause: 'Пауза', play: 'Пуск', embed: 'Встроить', saved: 'Сохранено', noVideo: 'Браузер не умеет записывать видео', anim: 'Анимация',
   embedText: 'Герой в этом наряде на любой странице: элемент <dota-hero> из npm-пакета dota-loadout. Модели грузятся с этого сайта.', copy: 'Копировать',
-  game: 'В игру', gameText: 'Этот наряд в самой Dota 2, у вас на компьютере (другие игроки его не видят): файл игры items_game.txt, в котором стандартные предметы героя выглядят как надетые здесь — модели и стили, эффекты, анимации, иконки способностей, необычный эффект, кинетический и призматический самоцветы. Это мод файлов игры: на ваш страх и риск.',
-  gameSteps: ['Скачайте pak01_dir.vpk и положите его в папку dota 2 beta/game/dota_loadout (создайте её).', 'В файле dota 2 beta/game/dota/gameinfo.gi над строкой «Game dota» добавьте строку «Game dota_loadout».', 'Один файл — один герой: следующий заменяет прежний. После обновления Доты скачайте файл заново и снова добавьте строку.'],
-  download: 'Скачать pak01_dir.vpk', loadingGame: (mb) => `Загрузка файла игры… ${mb} МБ`, building: 'Сборка…', gameFailed: 'Не удалось собрать файл', gameNothing: 'Нечего ставить: на герое только стандартные предметы', gameLeft: 'Не вошло:',
-  gameWhy: { pet: 'курьеры и варды так не ставятся', 'no default': 'у героя нет стандартного предмета в этом слоте', unknown: 'предмета нет в файле игры', 'other hero': 'предмета нет в файле игры' },
+  game: 'В игру', gameText: 'Этот наряд в самой Dota 2, у вас на компьютере (другие игроки его не видят), как ставят моды: файлы игры на месте стандартных — модели предметов в их стилях, их эффекты и необычный эффект, эффекты и иконки способностей, анимации предметов и кинетических самоцветов. Призматические самоцветы так не ставятся. Это мод файлов игры: на ваш страх и риск.',
+  gameSteps: ['Скачайте pak88_dir.vpk и положите его в папку dota 2 beta/game/dota_russian (создайте её; если моды уже стоят в папке другого языка — туда).', 'В параметрах запуска Доты в Steam добавьте -language russian.', 'Один файл — один герой: следующий заменяет прежний. После обновления Доты скачайте файл заново.'],
+  download: 'Скачать pak88_dir.vpk', loadingGame: (mb) => `Загрузка файлов игры… ${mb} МБ`, gameFailed: 'Не удалось собрать файл', gameNothing: 'Нечего ставить: на герое только стандартные предметы', gameLeft: 'Не вошло:', gameAnims: 'Анимации', gameMissing: (n) => `Нет на сайте файлов игры: ${n}`,
+  gameWhy: { pet: 'курьеры и варды так не ставятся', 'no default': 'у героя нет стандартной модели в этом слоте', 'no model': 'у предмета нет своей модели', unknown: 'предмета нет в данных игры', gem: 'призматический самоцвет так не ставится', extra: 'дополнительная модель предмета' },
 } : {
   heroes: 'Heroes', share: 'Link', copied: 'Copied', standard: 'Default', empty: 'Empty', none: 'None', find: 'Search', nothing: 'Nothing found', findHero: 'Find a hero', close: 'Close',
   skins: (n) => `${n} skins`, items: (n) => `${n} items`, off: 'click again to take it off',
@@ -28,10 +28,10 @@ const T = ru ? {
   setOn: 'Worn', screens: "The hero's loading screens", scenes: 'Scenes', noBackdrop: 'None', stuffs: { gold: 'Gold', frost: 'Frost', jade: 'Jade', stone: 'Stone' }, hero: 'Hero', effigyTip: 'Pick an animation and pause: that is the statue’s pose.',
   frame: 'Frame', video: 'Video', stop: 'Stop', pause: 'Pause', play: 'Play', embed: 'Embed', saved: 'Saved', noVideo: 'This browser cannot record video', anim: 'Animation',
   embedText: 'The hero in this outfit on any page: the <dota-hero> element of the dota-loadout npm package. Models load from this site.', copy: 'Copy',
-  game: 'To the game', gameText: 'This outfit in Dota 2 itself, on your computer (other players do not see it): the game’s items_game.txt in which the hero’s default items look like what he wears here — models and styles, effects, animations, ability icons, the unusual effect, kinetic and prismatic gems. It is a mod of the game’s files: at your own risk.',
-  gameSteps: ['Download pak01_dir.vpk and put it in the folder dota 2 beta/game/dota_loadout (make it).', 'In dota 2 beta/game/dota/gameinfo.gi, add the line “Game dota_loadout” above the line “Game dota”.', 'One file, one hero: the next replaces the last. After a Dota update, download the file again and add the line again.'],
-  download: 'Download pak01_dir.vpk', loadingGame: (mb) => `Loading the game’s file… ${mb} MB`, building: 'Building…', gameFailed: 'Could not build the file', gameNothing: 'Nothing to put on: he wears only his defaults', gameLeft: 'Left out:',
-  gameWhy: { pet: 'couriers and wards cannot go in this way', 'no default': 'the hero has no default item in this slot', unknown: 'the item is not in the game’s file', 'other hero': 'the item is not in the game’s file' },
+  game: 'To the game', gameText: 'This outfit in Dota 2 itself, on your computer (other players do not see it), as mods are put in: the game’s files in place of the defaults — the items’ models in their styles, their effects and the unusual effect, ability effects and icons, the animations of items and kinetic gems. Prismatic gems cannot go in this way. It is a mod of the game’s files: at your own risk.',
+  gameSteps: ['Download pak88_dir.vpk and put it in the folder dota 2 beta/game/dota_russian (make it; if your mods are in another language’s folder, put it there).', 'Add -language russian to Dota’s launch options in Steam.', 'One file, one hero: the next replaces the last. After a Dota update, download the file again.'],
+  download: 'Download pak88_dir.vpk', loadingGame: (mb) => `Loading the game’s files… ${mb} MB`, gameFailed: 'Could not build the file', gameNothing: 'Nothing to put on: he wears only his defaults', gameLeft: 'Left out:', gameAnims: 'Animations', gameMissing: (n) => `Game files missing on the site: ${n}`,
+  gameWhy: { pet: 'couriers and wards cannot go in this way', 'no default': 'the hero has no default model in this slot', 'no model': 'the item has no model of its own', unknown: 'the item is not in the game’s data', gem: 'a prismatic gem cannot go in this way', extra: 'an extra model of the item' },
 };
 const ACCENT = { str: '#e5533d', agi: '#4ec46b', int: '#3fa7e8', all: '#c58cf0' };
 const STUFFS = { gold: '#e0a040', frost: '#9fd0ff', jade: '#3fa36a', stone: '#8a8580' };
@@ -289,12 +289,16 @@ function openGame() {
   get.onclick = async () => {
     get.disabled = true; report.replaceChildren();
     try {
-      const { file, done, skipped } = await kit.toGame((n) => { get.textContent = n < 0 ? T.building : T.loadingGame((n / 1048576).toFixed(0)); });
-      if (file) download(new Blob([file], { type: 'application/octet-stream' }), 'pak01_dir.vpk');
-      const extras = (d) => [d.unusual != null && T.unusual, d.kinetic != null && T.kinetic, d.color && T.gem].filter(Boolean).map((x) => x.toLowerCase());
+      const { file, done, left, missing } = await kit.toGame((n) => { get.textContent = T.loadingGame((n / 1048576).toFixed(0)); });
+      if (file) download(new Blob([file], { type: 'application/octet-stream' }), 'pak88_dir.vpk');
+      // What went in: the worn slots not left out, with their unusual effect and kinetic gem; the hero's animations.
+      const out = new Set(left.map((x) => x.slot)), extras = (slot) => [look.unusual[slot] != null && T.unusual, look.kinetic[slot] != null && T.kinetic].filter(Boolean).map((x) => x.toLowerCase());
+      const anims = done.find((d) => d.what.modifiers?.length);
       report.replaceChildren(...[
-        file ? h('ul', {}, ...done.map((d) => h('li', {}, h('b', {}, nameOf(d.slot)), ` ${say(kit.item(d.item)?.name)}`, extras(d).length ? h('small', {}, ` + ${extras(d).join(', ')}`) : null))) : h('p', {}, T.gameNothing),
-        skipped.length ? h('p', {}, T.gameLeft, ...skipped.map((x) => h('span', {}, ` ${nameOf(x.slot)} — ${T.gameWhy[x.reason] || x.reason}.`))) : null].filter(Boolean));
+        file ? h('ul', {}, ...Object.entries(look.worn).filter(([slot, w]) => w && look.applies(slot) && !out.has(slot)).map(([slot, [id]]) => h('li', {}, h('b', {}, nameOf(slot)), ` ${say(kit.item(id)?.name)}`, extras(slot).length ? h('small', {}, ` + ${extras(slot).join(', ')}`) : null)),
+          anims ? h('li', {}, h('b', {}, T.gameAnims), ` ${anims.what.modifiers.join(', ')}`) : null) : h('p', {}, T.gameNothing),
+        left.length ? h('p', {}, T.gameLeft, ...left.map((x) => h('span', {}, ` ${nameOf(x.slot)} — ${T.gameWhy[x.reason] || T.gameWhy[x.reason.split(' ')[0]] || x.reason}.`))) : null,
+        missing.length ? h('p', {}, T.gameMissing(missing.length)) : null].filter(Boolean));
     } catch (e) { console.error(e); report.replaceChildren(h('p', {}, T.gameFailed)); }
     get.disabled = false; get.textContent = T.download;
   };

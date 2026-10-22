@@ -1,5 +1,5 @@
 // Valve's KeyValues text (scripts/npc, items_game.txt, portraits, localization) to plain objects —
-// the tools' and the site's (an outfit for the game, src/vpk.js).
+// the tools' (and tools/lib/gamedata.mjs's: the game data of the site's «To the game»).
 // Keys keep their case; a repeated key keeps the first value, except blocks, which merge — but an
 // item's asset modifiers, many under the same name, each keep their own (asset_modifier#2, …).
 // Conditionals ([$WIN32]) are dropped with the value they guard; #base lines are returned apart.

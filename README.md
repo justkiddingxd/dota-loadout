@@ -163,19 +163,20 @@ wards stand beside any hero as pets (`node tools/build-couriers.mjs`: `assets/it
 `assets/couriers.json`; a courier's flying model is a style): `viewer.wear('courier', 10018, 1)`, or
 `courier=10018.1,ward=10006` in an address. Their effects ride on their own skeleton.
 
-An outfit can go into the game itself, as mods do: `node tools/build-vpk.mjs '#juggernaut/hero_base=9059,head=30261'`
-(an address or a whole link) writes `dota_loadout/pak88_dir.vpk` of the game's own files put in place of
-the hero's defaults — no game file changed. Each worn item's model (in its style's skin) at its slot's
-default model, with its effects and its unusual effect in it (`particle_cfg_list` in the model's
-keyvalues, as the game's own models have them); the default's effects emptied; the effects, models and
-ability icons it puts in place of the hero's; and the hero's model (an arcana's form) with the activity
-modifiers of his items and kinetic gems made his plain animations. `src/kv3bin.js` reads and writes the
-compiled files' binary KeyValues3 (a model rewritten untouched reads the same in Source2Viewer),
-`src/resource.js` their blocks, `src/gamemod.js` makes the changes. The file goes to
-`dota 2 beta/game/dota_russian/` with `-language russian` in the launch options. Prismatic gems, extra
-models, couriers and wards are left out; files not fetched (ability icons: `node tools/fetch-dota.mjs
---paths '^panorama/images/spellicons/'`) are named. A prototype: the site's «To the game» still writes the
-older `items_game.txt` VPK, which the game does not load (it checks its scripts' signatures).
+An outfit can go into the game itself, as mods do: the site's «To the game» builds it in the browser
+(`src/gamevpk.js`), `node tools/build-vpk.mjs '#juggernaut/hero_base=9059,head=30261'` (an address or a
+whole link) in node — a `pak88_dir.vpk` of the game's own files put in place of the hero's defaults, no
+game file changed. Each worn item's model (in its style's skin) at its slot's default model, with its
+effects and its unusual effect in it (`particle_cfg_list` in the model's keyvalues, as the game's own
+models have them); the default's effects emptied; the effects, models and ability icons it puts in place
+of the hero's; and the hero's model (an arcana's form) with the activity modifiers of his items and kinetic
+gems made his plain animations. `src/kv3bin.js` reads the compiled files' binary KeyValues3 (versions 1–5)
+and writes it back (4 and 5; a model rewritten untouched reads the same in Source2Viewer), `src/resource.js`
+their blocks, `src/gamemod.js` makes the changes. `node tools/build-game.mjs` writes each hero's game data
+(`assets/heroes/<id>/game.json`) and the game files it uses to `assets/game/` (about 1 GB, served as they
+are; `tools/update.mjs` runs it after a patch). The file goes to `dota 2 beta/game/dota_russian/` with
+`-language russian` in the launch options. Prismatic gems, extra models, couriers, wards and personas'
+switching are left out.
 
 Items go to `assets/items/<id>/` (models, materials and effects of all their styles), each hero's catalog
 to `assets/heroes/<id>/items.json`. They are not kept in git (about 250 KB an item, 10 000 items).
@@ -212,4 +213,4 @@ Loadout — все герои Dota 2 в браузере на three.js: игро
 (на сервере раз в сутки, `loadout-update.timer`; подробности выше, в Cosmetics). На сайте есть насмешки,
 эмблемы, эффекты способностей у предметов, загрузочные экраны героя как фон и статуи-эффигии (золото, лёд,
 нефрит, камень). Курьеры и варды встают рядом с любым героем (режим «Курьер»).
-`node tools/build-vpk.mjs '<адрес>'` собирает наряд в VPK для самой игры, как делают моды: модели предметов на месте стандартных, их эффекты и необычный эффект в модели, эффекты способностей, иконки и анимации предметов и кинетических самоцветов в модели героя. Файл кладётся в `dota 2 beta/game/dota_russian/`, в параметры запуска — `-language russian` (прототип; подробности выше).
+Кнопка «В игру» (или `node tools/build-vpk.mjs '<адрес>'`) собирает наряд в VPK для самой игры, как делают моды: модели предметов на месте стандартных, их эффекты и необычный эффект в модели, эффекты способностей, иконки и анимации предметов и кинетических самоцветов в модели героя. Файл кладётся в `dota 2 beta/game/dota_russian/`, в параметры запуска — `-language russian` (подробности выше).
